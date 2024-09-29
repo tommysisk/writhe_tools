@@ -3,6 +3,7 @@ import scipy
 from sklearn.cluster import KMeans
 from .utils import group_by, sort_indices_list
 
+
 def pmf1d(x: np.ndarray,
           bins: int,
           weights: np.ndarray = None,

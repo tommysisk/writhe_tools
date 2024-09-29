@@ -105,6 +105,7 @@ def writhe_segments_cuda(segments, xyz, device: int = 0):
     segments = segments.unsqueeze(0) if segments.ndim < 2 else segments
     smat = (xyz.unsqueeze(0) if xyz.ndim < 3 else xyz)[:, segments]
     result = writhe_segments(smat=smat.to(device)).cpu()
+    del smat
     torch.cuda.empty_cache()
     return result
 

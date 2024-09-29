@@ -37,6 +37,49 @@ def sort_indices_list(indices_list: list,
     return list(map(sort, indices_list))
 
 
+def flat_index(i: "row idx",
+               j: "column idx",
+               n: "rows",
+               m: "cols" = None,
+               d0: "degree of diag before flattening" = 0,
+               triu: bool = False,
+               ):
+    """retrieve index of data point in flattened matrix
+    based on the indices the data point would have had in the unflattened matrix.
+
+    In the case of flattened upper diagonal matrix :
+    If supdiagonals were removed from the original matrix before flattening, adjust
+    the d0 input to account for it.
+    d0=0 means that the main diagonal was included in the original flattening"""
+
+    if m is None:
+        m = n
+
+    if triu:
+        tri = i + d0
+    else:
+        tri = 0
+        assert d0 == 0, "if not a triu matrix, d0 should be 0"
+
+    index = i * m + j - (tri ** 2 + tri) / 2
+
+    return index
+
+def triu_flat_indices(n: int, d0: int, d1: int = None):
+    """convienience function for getting indices of values in
+    a flattened trui matrix of supdiagonal degree, d0, corresponding to
+    degree d1, thus, d1>d0 as this essentially ~downsamples~
+    the data in the flattened matrix but cannot upsample it"""
+    if d1 is not None:
+        assert d1 >= d0, \
+            "New degree must be equal or larger than old degree to return meaningful result"
+    else:
+        d1 = d0
+
+    args = dict(zip(["i", "j"], np.triu_indices(n, d1)))
+    return flat_index(**args, n=n, d0=d0, triu=True).astype(int)
+
+
 def group_by(keys: np.ndarray,
              values: np.ndarray = None,
              reduction: callable = None):

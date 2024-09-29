@@ -3,7 +3,7 @@
 The package contains the following ...
 
 - Numerical routines for computing the writhe using CPU or GPU devices. In either case, computations are parallelized over CPU / GPU cores / devices.
-- A class architecture for writhe computation and visualization, making implementation and visualization of the results immediate and seamless. 
+- A class architecture for writhe computation and visualization, making implementation and visualization of the results seamless and efficient. 
 - An implementation of the novel writhe-based graph attention message passing layer.
 - An implementation of the SE3 equivariant, writhe-PaiNN neural netowrk architecture where SE3 equivariance is acheived by only augmenting invariant graph features.
 - Implementations of the orginial PaiNN architecture and the cPaiNN achitecture for comparison.
@@ -12,4 +12,4 @@ The package contains the following ...
 
 For an example of how to use this package to analyze molecular dynamics simulation data, see analysis_example.ipynb.
 
-To train 
+
