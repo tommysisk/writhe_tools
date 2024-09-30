@@ -32,6 +32,6 @@ The package contains the following ...
 
 
 
-#### To train a score-based generative model with any of the architectures listed above, see the sbm_scripts folder 
+#### To train score-based generative models with any of the architectures listed above, see the sbm_scripts folder 
 
 ![Alt text](./images/writhe_layer.png)
