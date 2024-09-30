@@ -153,6 +153,7 @@ def plot_its(estimate: np.ndarray, estimate_error=None, n_its: int = None,
              lag: int = 1, dt: float = .2, unit="ns", cmap: str = "jet",
              fig_width=10, fig_length=6, title: str = "Implied Timescales",
              ax=None, plot_text_scale: float = 5, yscale="log"):
+
     """estimate: eigen vals estimated at integer multiples of the lag time
     predict: eigen vals of the initial lagtime propagated via exponentiation"""
 
