@@ -7,8 +7,8 @@
 
 
 <p align="center">
-  <img src="./images/writhe_asyn.png" width="410"/>
   <img src="./images/visualize_writhe.png" width="410"/>
+  <img src="./images/writhe_asyn.png" width="410"/>
 </p>
 
 
