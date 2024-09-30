@@ -1,8 +1,8 @@
 # Code accompanying the paper, 'On the application of knot theoretic descriptions of proteins to dynamics and generative modeling'
 
 <p align="center">
-  <img src="./images/writhe_asyn.png" width="430"/>
-  <img src="./images/visualize_writhe.png" width="430"/>
+  <img src="./images/writhe_asyn.png" width="420"/>
+  <img src="./images/visualize_writhe.png" width="420"/>
 </p>
 
 
