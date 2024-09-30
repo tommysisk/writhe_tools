@@ -17,6 +17,7 @@ def reindex_msm(dtrajs: np.ndarray,
                 ck_est_err: np.ndarray = None,
                 obs: np.ndarray = None,
                 maximize_obs=True):
+
     args = locals()
     results = {}
     if obs is None:
@@ -177,6 +178,7 @@ def plot_its(estimate: np.ndarray, estimate_error=None, n_its: int = None,
                                   range(n_its)):
         ax.plot(lag_dt, est_proc, label="Estimate", color=color)
         ax.scatter(lag_dt, est_proc, color=color)
+
     if estimate_error is not None:
         for est_error, color, _ in zip([estimate_error[:, i] for i in range(estimate_error.shape[1])],
                                        color_list,
@@ -427,6 +429,7 @@ class MarkovModel:
         # get stationary distributions
         self.hmm["data"]["stat_dists"] = np.stack([hmm.transition_model.stationary_distribution
                                                    for hmm in self.hmm["msms"]])
+
         # get implied timescales
         self.hmm["its_est"] = get_its(self.hmm["data"]["tmats"], self.lag)[-1]
 
@@ -439,6 +442,7 @@ class MarkovModel:
         return self
 
     def estimate_pcca(self, n_states: int):
+
         assert len(self.msm) != 0, "Must estimate regular msm before coarse graining (self.estimate_msm(lag=lag))"
 
         self.pcca.update(dict(data={}))
@@ -453,8 +457,7 @@ class MarkovModel:
         self.pcca["data"]["stat_dists"] = np.stack([pcca.coarse_grained_stationary_probability
                                                     for pcca in self.pcca["msms"]])
 
-        self.pcca["its_est"] = get_its(self.pcca["data"]["tmats"],
-                                       self.lag)[-1]
+        self.pcca["its_est"] = get_its(self.pcca["data"]["tmats"], self.lag)[-1]
 
         # get cktest data
         ck = self.msm["msms"][0].ck_test(self.msm["msms"][1:],
@@ -497,9 +500,13 @@ class MarkovModel:
 
     def cktest(self, model_type,
                predict_color: str = "red"):
-        """CAUTION : running this for a model with very large
+
+        """
+        CAUTION : running this for a model with very large
         number of states will not produce a useful plot and
-        may not work at all"""
+        may not work at all
+        """
+
         assert len(getattr(self, model_type)) != 0, "Must estimate the chosen model type before plotting"
         data = getattr(self, model_type)["data"]
 

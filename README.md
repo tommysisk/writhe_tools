@@ -1,5 +1,26 @@
 # Code accompanying the paper, 'On the application of knot theoretic descriptions of proteins to dynamics and generative modeling'
 
+<p align="center">
+  <img src="./images/writhe_asyn.png" width="200"/>
+  <img src="./images/visualize_writhe.png" width="200"/>
+</p>
+
+
+[//]: # (![Alt text]&#40;./images/writhe_asyn.png&#41;)
+
+[//]: # ()
+[//]: # (<p align="center" style="font-size:25px;">)
+
+[//]: # (  Computation of the Writhe)
+
+[//]: # (</p>)
+
+[//]: # ()
+[//]: # (![Alt text]&#40;./images/visualize_writhe.png&#41;)
+
+
+
+
 The package contains the following ...
 
 - Numerical routines for computing the writhe using CPU or GPU devices. In either case, computations are parallelized over CPU / GPU cores / devices.
@@ -10,6 +31,13 @@ The package contains the following ...
 - An implementation of a score based diffusion model to train all architectures.
 - Classes to compute (time-lagged) canonical correlation analysis and visualize results.
 
+
 For an example of how to use this package to analyze molecular dynamics simulation data, see analysis_example.ipynb.
 
 
+
+
+
+To train a score-based generative model with any of the architectures listed above, see the sbm_scripts folder 
+
+![Alt text](./images/writhe_layer.png)
