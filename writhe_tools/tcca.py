@@ -148,6 +148,7 @@ class CCA:
             epsilon: float = None,
             dask: bool = False):
 
+
         if dim is None:
             dim = self.dim
 
@@ -175,16 +176,16 @@ class CCA:
         cca = pseudo_half_inv["x0"].T @ cov(x0, x1) @ pseudo_half_inv["x1"]
 
         if dask:
-            v0, s, v1_t = dask_svd(cca, compressed=True, k=self.dim)
+            v0, svals, v1_t = dask_svd(cca, compressed=True, k=self.dim)
         else:
-            v0, s, v1_t = svd(cca, full_matrices=False, lapack_driver='gesvd')
+            v0, svals, v1_t = svd(cca, full_matrices=False, lapack_driver='gesvd')
 
         v1 = v1_t.T
 
         v0, v1 = [v[..., :dim] for v in [v0, v1]]
-        s = s[:dim]
+        svals = svals[:dim]
 
-        for key in "pseudo_half_inv,cca,v0,s,v1,dim,epsilon".split(","):
+        for key in "pseudo_half_inv,cca,v0,svals,v1,dim,epsilon".split(","):
             setattr(self, key, locals()[key])
 
         self.has_fit = True
@@ -194,7 +195,7 @@ class CCA:
     def transform(self,
                   x: "a numpy array related to the data used in fit or str(x0,x1)" = None,
                   dim: int = None,
-                  scale=False):
+                  scale: bool = False):
 
         assert self.has_fit, "Must fit before transforming (use fit_transform or fit)"
 
@@ -209,7 +210,7 @@ class CCA:
             vecs = [getattr(self, f"v{i}")[:, :dim] for i in range(2)]
 
             if scale:
-                vecs = [v * self.s[:dim] for v in vecs]
+                vecs = [v * self.svals[:dim] for v in vecs]
 
             return [getattr(self, xi) - getattr(self, f"{xi}_mean") @ self.pseudo_half_inv[xi] @ v
                     for xi, v in zip(["x0", "x1"], vecs)]
@@ -221,7 +222,7 @@ class CCA:
             v = getattr(self, f"v{x[-1]}")[:dim]
 
             if scale:
-                v = v * self.s[:dim]
+                v = v * self.svals[:dim]
 
             return (getattr(self, x) - getattr(self, f"{x}_mean")) @ self.pseudo_half_inv[x] @ v
 
@@ -234,7 +235,7 @@ class CCA:
             v = self.v0[:, :dim]
 
             if scale:
-                v = v * self.s[:dim]
+                v = v * self.svals[:dim]
 
             return (x - self.x0_mean) @ self.pseudo_half_inv["x0"] @ v
 
@@ -272,6 +273,7 @@ def _tcca_score(data: np.ndarray,
                 path: str = None,
                 project: bool = True,
                 singular_vectors: bool = False):
+
     if path is not None:
         if not os.path.isdir(path):
             os.makedirs(path)
@@ -282,7 +284,7 @@ def _tcca_score(data: np.ndarray,
     file = f"{path}/{dscr}tCCA_lag_{lag}"
 
     tcca = tCCA(np.double(data), lag=lag, dim=dim).fit()
-    np.save(f"{file}_singular_values", tcca.s)
+    np.save(f"{file}_singular_values", tcca.svals)
 
     if singular_vectors:
         np.save(f"{file}_singular_vectors", tcca.v0)
@@ -301,6 +303,7 @@ def _tcca_scores(data: np.ndarray,
                  path: str = None,
                  project: bool = True,
                  singular_vectors: bool = False):
+
     func = functools.partial(_tcca_score,
                              data=data,
                              dscr=dscr,

@@ -8,6 +8,21 @@ import time
 from numpy_indexed import group_by as group_by_
 import functools
 import gc
+import matplotlib.pyplot as plt
+
+
+def gpu_stats():
+    def list_tensors_on_gpu():
+        all_tensors = [obj for obj in gc.get_objects() if isinstance(obj, torch.Tensor) and obj.is_cuda]
+        for tensor in all_tensors:
+            print(f"Tensor ID: {id(tensor)}, Size: {tensor.size()}, Device: {tensor.device}")
+    list_tensors_on_gpu()
+    allocated_memory = torch.cuda.memory_allocated()
+    print(f"Allocated memory: {allocated_memory / (1024 ** 2):.2f} MB")
+    # Total memory reserved by PyTorch
+    reserved_memory = torch.cuda.memory_reserved()
+    print(f"Reserved memory: {reserved_memory / (1024 ** 2):.2f} MB")
+    print(torch.cuda.memory_summary(device=None, abbreviated=False))
 
 
 def split_list(lst, n):
@@ -210,6 +225,11 @@ def cleanup():
 def window_average(x, N):
     cumsum = np.cumsum(np.insert(x, 0, 0))
     return (cumsum[N:] - cumsum[:-N]) / float(N)
+
+def get_color_list(n_colors: int, cmap: str, trunc=0, pre_trunc=0):
+    cmap = getattr(plt.cm, cmap)
+    cl = [cmap(i) for i in range(cmap.N)]
+    return [cl[i] for i in np.linspace(1 + pre_trunc, len(cl) - 1 - trunc, n_colors).astype(int)]
 
 
 
