@@ -37,6 +37,10 @@ def split_list(lst, n):
     return [lst[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n)]
 
 
+def reindex_list(unsorted_list: list, indices: "list or np.ndarray"):
+    return list(map(unsorted_list.__getitem__, to_numpy(indices).astype(int)))
+
+
 def sort_by_val_in(indices: np.ndarray,
                    value: np.ndarray,
                    max: bool = True):
