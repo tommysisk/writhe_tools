@@ -226,6 +226,7 @@ def window_average(x, N):
     cumsum = np.cumsum(np.insert(x, 0, 0))
     return (cumsum[N:] - cumsum[:-N]) / float(N)
 
+
 def get_color_list(n_colors: int, cmap: str, trunc=0, pre_trunc=0):
     cmap = getattr(plt.cm, cmap)
     cl = [cmap(i) for i in range(cmap.N)]
