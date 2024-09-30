@@ -2,7 +2,7 @@
 
 
 <p align="center" style="font-size:25px;">
-  Computation of the Writhe and Analysis of polymer coordinate data
+  Computation of the writhe and wnalysis of polymer coordinate data
 </p>
 
 
