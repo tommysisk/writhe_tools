@@ -26,12 +26,12 @@ The package contains the following ...
 - Classes to compute (time-lagged) canonical correlation analysis and visualize results.
 
 
-#### For an example of how to use this package to analyze molecular dynamics simulation data, see analysis_example.ipynb.
+#### For an example of how to use this package to analyze molecular dynamics simulation data, see analysis_example.ipynb in the examples folder.
 
 
 
 
 
-#### To train score-based generative models with any of the architectures listed above, see the sbm_scripts folder 
+#### To train score-based generative models with any of the architectures listed above, see the sbm_scripts folder.
 
 ![Alt text](./images/writhe_layer.png)
