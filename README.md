@@ -1,7 +1,7 @@
 # Code accompanying the paper, 'On the application of knot theoretic descriptions of proteins to dynamics and generative modeling'
 
 
-<p align="center" style="font-size:25px;">
+<p align="center" style="font-size:40px;">
   Computation of the writhe and analysis of polymer coordinate data
 </p>
 
