@@ -47,8 +47,8 @@ def pmfdd(arrays: "a list of arrays or N,d numpy array",
                                                         range=range)
 
 
-    if range is not None:
-        idx = np.stack([np.digitize(value, edge[1:-1]) for edge, value in zip(edges, arrays.T)]) + 1
+    # if range is not None:
+    #     idx = np.stack([np.digitize(value, edge[1:-1]) for edge, value in zip(edges, arrays.T)]) + 1
 
     idx = np.ravel_multi_index(idx - 1, tuple([bins for i in arrays.T]))
 
