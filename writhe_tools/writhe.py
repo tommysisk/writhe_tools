@@ -10,18 +10,16 @@ import numpy as np
 import warnings
 import matplotlib.text
 import logging
-
 import torch
 
 from .utils import (save_dict,
                     load_dict,
                     to_numpy,
-                    get_segments,
                     Timer,
                     window_average,
-                    cleanup
                     )
-from .writhe_nn import calc_writhe_parallel_cuda
+
+from .writhe_utils import calc_writhe_parallel_cuda, get_segments
 
 
 class MplFilter(logging.Filter):

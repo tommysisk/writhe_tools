@@ -1,13 +1,11 @@
 #!/usr/bin/env python
 from typing import List, Any
-
 import torch
 import torch.nn as nn
 from torch_scatter import scatter
 import math
-from .utils import get_segments, split_list
+from .writhe_utils import get_segments
 from functools import partial
-import ray
 
 
 @torch.jit.script
@@ -36,6 +34,14 @@ def ndet(v1: torch.Tensor, v2: torch.Tensor, v3: torch.Tensor):
 
 
 @torch.jit.script
+def uproj(a, b, norm_b: bool = True, norm_proj: bool = True):
+    b = nnorm(b) if norm_b else b
+    # faster than np.matmul when using ray
+    proj = a - b * (a * b).sum(dim=-1).unsqueeze(-1)
+    return nnorm(proj) if norm_proj else proj
+
+
+@torch.jit.script
 def writhe_segments(segments: torch.Tensor = None,
                     xyz: torch.Tensor = None,
                     ):
@@ -55,7 +61,7 @@ def writhe_segments(segments: torch.Tensor = None,
     smat : array of shape (Nframes, Nsegments, 4, 3)
     """
     # ensure correct shape for segment for lazy arguments
-    #if smat is None:
+    # if smat is None:
     assert segments is not None and xyz is not None, "Must provide segments and xyz if not smat"
     assert segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
     segments = segments.unsqueeze(0) if segments.ndim < 2 else segments
@@ -76,152 +82,6 @@ def writhe_segments(segments: torch.Tensor = None,
     wr = (1 / (2 * torch.pi)) * (omega * signs)
 
     return wr.squeeze()
-
-
-def writhe_smat(smat: torch.Tensor, device: int = 0):
-    """
-    Function to use GPU in computation of the writhe; NOT to be used in neural nets
-    smat: array of shape(Nframes, Nsegments, 4, 3), coordinate array sliced with segments array
-
-    """
-    smat = smat.to(device)
-
-    displacements = nnorm((-smat[:, :, :2, None, :] + smat[:, :, None, 2:, :]
-                           ).reshape(-1, smat.shape[1], 4, 3))
-
-    signs = torch.sign(ndot(ncross(smat[:, :, 3] - smat[:, :, 2],
-                                   smat[:, :, 1] - smat[:, :, 0]),
-                            displacements[:, :, 0]))
-
-    del smat
-
-    crosses = nnorm(ncross(displacements[:, :, [0, 1, 3, 2]], displacements[:, :, [1, 3, 2, 0]]))
-
-    del displacements
-
-    omega = torch.arcsin(ndot(crosses[:, :, [0, 1, 2, 3]],
-                              crosses[:, :, [1, 2, 3, 0]]).clip(-1, 1)).sum(2)
-
-    del crosses
-
-    return (omega * signs / (2 * torch.pi)).cpu()
-
-
-# how to compute writhe angle (omega) using ortho projection rather than cross products. Still appears to be slower than cross products.
-# smat = xyz[:, segments]
-# n_segments = smat.shape[1]
-# indices = torch.LongTensor([[0, 1, 0, 2],
-#                             [3, 2, 3, 1],
-#                             [1, 3, 2, 0]
-#                            ]).T
-#
-# dx = nnorm((-smat[:, :, :2, None, :] + smat[:, :, None, 2:, :]).reshape(-1, n_segments, 4, 3)) #displacements
-# omega = (-torch.arcsin(uproj(dx[:, :, indices[:,:-1]], dx[:, :, indices[:, -1], None]).prod(dim=-2).sum(-1).clip(-1, 1))).sum(-1)
-
-
-def peak_mem_writhe(n_segments, n_samples):
-    """
-    Return the estimated peak memory required by a broadcasted writhe calculation using
-    n_segments and n_samples in GB.
-
-    This was determined through numerical anaylsis, however, can only be considered a rule of thumb.
-
-    Actual segment batch size may need to be adjusted.
-
-
-    """
-    return (n_segments * 2.01708461e-07 + 5.93515514e-08) * n_samples
-
-
-def get_available_memory(device: int = 0):
-    """return VRAM available on a device in GB"""
-
-    assert torch.cuda.is_available(), "CUDA is not available"
-
-    return (torch.cuda.get_device_properties(device).total_memory
-            - torch.cuda.memory_allocated(device)) / 1024 ** 3
-
-
-def get_segment_batch_size(n_samples, device: int = 0):
-
-    mem = get_available_memory() - 2  # torch seems to need atleast 2 GB more than
-
-    return int(((mem / n_samples) - 5.93515514e-08) / 2.01708461e-07)
-
-
-def writhe_segments_cuda(segments, xyz, device: int = 0):
-    segments = segments.unsqueeze(0) if segments.ndim < 2 else segments
-    smat = (xyz.unsqueeze(0) if xyz.ndim < 3 else xyz)[:, segments]
-    result = writhe_smat(smat=smat, device=device)
-    torch.cuda.empty_cache()
-    return result
-
-
-def writhe_segments_minibatches(segment_chunks: list, xyz: torch.tensor, device: int):
-    xyz = ray.get(xyz) if not isinstance(xyz, torch.Tensor) else xyz
-    return torch.cat([writhe_segments_cuda(segments=i, xyz=xyz, device=device) for i in segment_chunks], -1)
-
-
-def calc_writhe_parallel_cuda(segments: torch.Tensor,
-                              xyz: torch.Tensor,
-                              reduce_batch_size: int = 0):
-    batch_size = get_segment_batch_size(len(xyz)) - reduce_batch_size
-
-    if batch_size > len(segments):
-        return writhe_segments_cuda(segments, xyz).numpy()
-
-    chunks = list(torch.split(segments, batch_size))
-
-    if len(segments) < 5 * batch_size or torch.cuda.device_count() == 1:
-        return writhe_segments_minibatches(chunks, xyz, 0).numpy()
-
-    else:
-        minibatches = split_list(chunks, torch.cuda.device_count())
-        xyz_ref = ray.put(xyz)
-        fxn = ray.remote(num_gpus=torch.cuda.device_count())(writhe_segments_minibatches)
-        return torch.cat(ray.get([fxn.remote(segment_chunks=j, xyz=xyz_ref, device=i)
-                                  for i, j in enumerate(minibatches)]), -1).numpy()
-
-
-@torch.jit.script
-def uproj(a, b, norm_b: bool = True, norm_proj: bool = True):
-    b = nnorm(b) if norm_b else b
-    # faster than np.matmul when using ray
-    proj = a - b * (a * b).sum(dim=-1).unsqueeze(-1)
-    return nnorm(proj) if norm_proj else proj
-
-
-
-class TorchWrithe(nn.Module):
-    """
-    Class to compute writhe using torch
-    """
-
-    def __init__(self,
-                 n_atoms: int,
-                 segment_length: int = 1,
-                 ):
-        super().__init__()
-
-        self.register_buffer("n_atoms_", torch.LongTensor([n_atoms]))
-        self.segment_length = segment_length
-
-    @property
-    def n_atoms(self):
-        return self.n_atoms_.item()
-
-    @property
-    def segment_length(self):
-        return self.segment_length_
-
-    @segment_length.setter
-    def segment_length(self, length: int):
-        self.segment_length_ = length
-        self.register_buffer("segments", get_segments(self.n_atoms, length, tensor=True))
-        return
-
-    def forward(self, xyz: torch.Tensor):
-        return writhe_segments(self.segments, xyz)
 
 
 class WritheMessage(nn.Module):
@@ -295,10 +155,9 @@ class WritheMessage(nn.Module):
         return (self.soft_one_hot(wr).unsqueeze(-1) * self.basis).sum(-2)
 
     def compute_writhe(self, x):
-        return self.embed_writhe(
-            writhe_segments(segments=self.segments,
-                            xyz=x.x.reshape(-1, self.n_atoms, 3))
-        ).repeat(1, 2, 1).reshape(-1, self.n_features)
+        return self.embed_writhe(writhe_segments(segments=self.segments,
+                                                 xyz=x.x.reshape(-1, self.n_atoms, 3))
+                                 ).repeat(1, 2, 1).reshape(-1, self.n_features)
 
     def forward(self, x, update=True):
         features = getattr(x, self.node_feature).clone()
@@ -329,6 +188,7 @@ class WritheMessage(nn.Module):
 
         else:
             return features + message if self.residual else message
+
 
 
 class _SoftUnitStep(torch.autograd.Function):
@@ -370,20 +230,6 @@ def soft_unit_step(x):
     `torch.Tensor`
         tensor of shape :math:`(...)`
 
-    Examples
-    --------
-
-    .. jupyter-execute::
-        :hide-code:
-
-        import torch
-        from e3nn.math import soft_unit_step
-        import matplotlib.pyplot as plt
-
-    .. jupyter-execute::
-
-        x = torch.linspace(-1.0, 10.0, 1000)
-        plt.plot(x, soft_unit_step(x));
     """
     return _SoftUnitStep.apply(x)
 
@@ -434,50 +280,6 @@ def soft_one_hot_linspace(x: torch.Tensor, start, end, number, basis=None, cutof
     `torch.Tensor`
         tensor of shape :math:`(..., N)`
 
-    Examples
-    --------
-
-    .. jupyter-execute::
-        :hide-code:
-
-        import torch
-        from e3nn.math import soft_one_hot_linspace
-        import matplotlib.pyplot as plt
-
-    .. jupyter-execute::
-
-        bases = ['gaussian', 'cosine', 'smooth_finite', 'fourier', 'bessel']
-        x = torch.linspace(-1.0, 2.0, 100)
-
-    .. jupyter-execute::
-
-        fig, axss = plt.subplots(len(bases), 2, figsize=(9, 6), sharex=True, sharey=True)
-
-        for axs, b in zip(axss, bases):
-            for ax, c in zip(axs, [True, False]):
-                plt.sca(ax)
-                plt.plot(x, soft_one_hot_linspace(x, -0.5, 1.5, number=4, basis=b, cutoff=c))
-                plt.plot([-0.5]*2, [-2, 2], 'k-.')
-                plt.plot([1.5]*2, [-2, 2], 'k-.')
-                plt.title(f"{b}" + (" with cutoff" if c else ""))
-
-        plt.ylim(-1, 1.5)
-        plt.tight_layout()
-
-    .. jupyter-execute::
-
-        fig, axss = plt.subplots(len(bases), 2, figsize=(9, 6), sharex=True, sharey=True)
-
-        for axs, b in zip(axss, bases):
-            for ax, c in zip(axs, [True, False]):
-                plt.sca(ax)
-                plt.plot(x, soft_one_hot_linspace(x, -0.5, 1.5, number=4, basis=b, cutoff=c).pow(2).sum(1))
-                plt.plot([-0.5]*2, [-2, 2], 'k-.')
-                plt.plot([1.5]*2, [-2, 2], 'k-.')
-                plt.title(f"{b}" + (" with cutoff" if c else ""))
-
-        plt.ylim(0, 2)
-        plt.tight_layout()
     """
     # pylint: disable=misplaced-comparison-constant
 
