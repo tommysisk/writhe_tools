@@ -56,9 +56,8 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor,):
     xyz: array of shape (Nframes, N_alpha_carbons, 3),coordinate array giving the positions of ALL the alpha carbons
 
     """
+
     # ensure correct shape for segment for lazy arguments
-    # if smat is None:
-    assert segments is not None and xyz is not None, "Must provide segments and xyz if not smat"
     assert segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
     segments = segments.unsqueeze(0) if segments.ndim < 2 else segments
     smat = (xyz.unsqueeze(0) if xyz.ndim < 3 else xyz)[:, segments]
