@@ -482,7 +482,7 @@ class Writhe:
 
             rotation = 90 if key == "xticks" else None
 
-            labels = labels[:-self.length][::label_stride]
+            labels = labels[np.linspace(0, self.n_points-1, self.n_points - self.length).astype(int)][::label_stride]
 
             ticks = np.linspace(0,
                                 self.n_points-self.length-1,
