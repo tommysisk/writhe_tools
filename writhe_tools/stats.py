@@ -144,7 +144,11 @@ def mi(x,
 
     """
 
-    pxy = pmf([x, y], bins=bins, weights=weights, norm=True)
+    pxy = pmf([x, y], bins=bins, weights=weights, norm=True)[0]
+
+    if min_count is not None:
+        pxy = np.where(pxy < min_count, 0, pxy)
+        pxy /= pxy.sum()
 
     if shift_min:
 
@@ -166,7 +170,7 @@ def mi(x,
            This gives same result as SKLearn but we can factor in weights using cluster
            similarity function"""
 
-        i, j = np.where(pxy != 0) if min_count is None else np.where(pxy >= min_count)
+        i, j = np.where(pxy != 0)
 
         px, py = pxy.sum(1), pxy.sum(0)
 
