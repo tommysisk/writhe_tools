@@ -42,9 +42,8 @@ def uproj(a, b, norm_b: bool = True, norm_proj: bool = True):
 
 
 @torch.jit.script
-def writhe_segments(segments: torch.Tensor = None,
-                    xyz: torch.Tensor = None,
-                    ):
+def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor,):
+
     """
     compute the writhe (signed crossing) of 2 segment pairs for NSegments and all frames (index 0) in xyz (xyz can contain just one frame)
 
@@ -150,8 +149,8 @@ class WritheMessage(nn.Module):
         return (self.soft_one_hot(wr).unsqueeze(-1) * self.basis).sum(-2)
 
     def compute_writhe(self, x):
-        return self.embed_writhe(writhe_segments(segments=self.segments,
-                                                 xyz=x.x.reshape(-1, self.n_atoms, 3))
+        return self.embed_writhe(writhe_segments(xyz=x.x.reshape(-1, self.n_atoms, 3),
+                                                 segments=self.segments,)
                                  ).repeat(1, 2, 1).reshape(-1, self.n_features)
 
     def forward(self, x, update=True):

@@ -76,7 +76,7 @@ class TorchWrithe(nn.Module):
         return
 
     def forward(self, xyz: torch.Tensor):
-        return writhe_segments(self.segments, xyz)
+        return writhe_segments(xyz, self.segments)
 
 
 # for computing but not deep learning, attempts to avoid leaving tensors hiding on GPUs
