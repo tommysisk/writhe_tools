@@ -56,9 +56,6 @@ def writhe_segments(segments: torch.Tensor = None,
 
     xyz: array of shape (Nframes, N_alpha_carbons, 3),coordinate array giving the positions of ALL the alpha carbons
 
-    ** OR
-
-    smat : array of shape (Nframes, Nsegments, 4, 3)
     """
     # ensure correct shape for segment for lazy arguments
     # if smat is None:
