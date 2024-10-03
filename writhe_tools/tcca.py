@@ -315,3 +315,61 @@ def _tcca_scores(data: np.ndarray,
     for lag in lags: func(lag=lag)
 
     return
+
+
+def add_intercept(x):
+    x = x.squeeze()
+    if x.ndim == 1:
+        return np.stack([x, np.ones_like(x)], 1)
+    else:
+        return np.concatenate([x, np.ones(len(x))[:, None]], 1)
+
+
+def matrix_power(x,
+                 power,
+                 epsilon: float = 1e-12,
+                 dask=False, sym=True):
+    if dask:
+        u, s, vt = dask_svd(x)
+
+    else:
+        if sym:
+            s, u = np.linalg.eigh(x)
+            vt = u.T
+        else:
+            u, s, vt = svd(x, full_matrices=False, lapack_driver="gesvd")
+
+    if epsilon is not None:
+        idx = s > epsilon
+        s = s[idx]
+        vt = vt[idx]
+        u = u[:, idx]
+
+    power = np.power(s, power)
+
+    return u @ np.diag(power) @ vt
+
+
+# beautiful linear regression
+def generalized_regression(x: np.ndarray, y: np.ndarray, weights: np.ndarray = None,
+                           transform: bool = False, fit: bool = False, intercept: bool = True):
+    # prep covariance estimator
+    cov_ = functools.partial(cov, shift=False, norm=False, weights=weights)
+
+    # add column of ones (intercept D.O.F)
+    x = add_intercept(np.copy(x)) if intercept else x
+
+    # get co-effs (solve the linear algebra problem with psuedo inv)
+    b = matrix_power(cov_(x), -1, sym=True) @ cov_(x, y)
+
+    # return fit
+    if transform:
+        return x @ b
+
+    # return function to transform data
+    elif fit:
+        return lambda x: x * b[0] + b[1]
+
+    # return co-effs
+    else:
+        return b

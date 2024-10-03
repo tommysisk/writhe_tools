@@ -14,7 +14,8 @@ class GraphDataSet(InMemoryDataset):
         if data_list is not None:
             data, slices = self.collate(data_list)
             torch.save((data, slices), file)
-        self.load(file)
+
+        self.data, self.slices = torch.load(file)
 
 
 def dict_map(dic, keys):

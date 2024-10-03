@@ -5,6 +5,12 @@ from itertools import chain
 from .stats import pmf
 
 
+def get_color_list(n_colors: int, cmap: str, trunc=0, pre_trunc=0):
+    cmap = getattr(plt.cm, cmap)
+    cl = [cmap(i) for i in range(cmap.N)]
+    return [cl[i] for i in np.linspace(1 + pre_trunc, len(cl) - 1 - trunc, n_colors).astype(int)]
+
+
 def truncate_colormap(cmap:str, minval=0.0, maxval=1.0, n=100):
     cmap = plt.get_cmap(cmap)
     new_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(

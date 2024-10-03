@@ -38,7 +38,7 @@ def ndet(v1: torch.Tensor, v2: torch.Tensor, v3: torch.Tensor):
 @torch.jit.script
 def writhe_segments(segments: torch.Tensor = None,
                     xyz: torch.Tensor = None,
-                    smat: torch.Tensor = None):
+                    ):
     """
     compute the writhe (signed crossing) of 2 segment pairs for NSegments and all frames (index 0) in xyz (xyz can contain just one frame)
 
@@ -55,11 +55,11 @@ def writhe_segments(segments: torch.Tensor = None,
     smat : array of shape (Nframes, Nsegments, 4, 3)
     """
     # ensure correct shape for segment for lazy arguments
-    if smat is None:
-        assert segments is not None and xyz is not None, "Must provide segments and xyz if not smat"
-        assert segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
-        segments = segments.unsqueeze(0) if segments.ndim < 2 else segments
-        smat = (xyz.unsqueeze(0) if xyz.ndim < 3 else xyz)[:, segments]
+    #if smat is None:
+    assert segments is not None and xyz is not None, "Must provide segments and xyz if not smat"
+    assert segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
+    segments = segments.unsqueeze(0) if segments.ndim < 2 else segments
+    smat = (xyz.unsqueeze(0) if xyz.ndim < 3 else xyz)[:, segments]
 
     displacements = nnorm((-smat[:, :, :2, None, :] + smat[:, :, None, 2:, :]
                            ).reshape(-1, smat.shape[1], 4, 3))
@@ -77,6 +77,36 @@ def writhe_segments(segments: torch.Tensor = None,
 
     return wr.squeeze()
 
+
+def writhe_smat(smat: torch.Tensor, device: int = 0):
+    """
+    Function to use GPU in computation of the writhe; NOT to be used in neural nets
+    smat: array of shape(Nframes, Nsegments, 4, 3), coordinate array sliced with segments array
+
+    """
+    smat = smat.to(device)
+
+    displacements = nnorm((-smat[:, :, :2, None, :] + smat[:, :, None, 2:, :]
+                           ).reshape(-1, smat.shape[1], 4, 3))
+
+    signs = torch.sign(ndot(ncross(smat[:, :, 3] - smat[:, :, 2],
+                                   smat[:, :, 1] - smat[:, :, 0]),
+                            displacements[:, :, 0]))
+
+    del smat
+
+    crosses = nnorm(ncross(displacements[:, :, [0, 1, 3, 2]], displacements[:, :, [1, 3, 2, 0]]))
+
+    del displacements
+
+    omega = torch.arcsin(ndot(crosses[:, :, [0, 1, 2, 3]],
+                              crosses[:, :, [1, 2, 3, 0]]).clip(-1, 1)).sum(2)
+
+    del crosses
+
+    return (omega * signs / (2 * torch.pi)).cpu()
+
+
 # how to compute writhe angle (omega) using ortho projection rather than cross products. Still appears to be slower than cross products.
 # smat = xyz[:, segments]
 # n_segments = smat.shape[1]
@@ -89,23 +119,40 @@ def writhe_segments(segments: torch.Tensor = None,
 # omega = (-torch.arcsin(uproj(dx[:, :, indices[:,:-1]], dx[:, :, indices[:, -1], None]).prod(dim=-2).sum(-1).clip(-1, 1))).sum(-1)
 
 
+def peak_mem_writhe(n_segments, n_samples):
+    """
+    Return the estimated peak memory required by a broadcasted writhe calculation using
+    n_segments and n_samples in GB.
 
-def get_segment_batch_size(n_samples: int, device: int = 0):
-    ratio = 2.9326512963968345e-07
-    mem = get_device_memory(device)
-    return int(mem / (n_samples * ratio) // 1)
+    This was determined through numerical anaylsis, however, can only be considered a rule of thumb.
+
+    Actual segment batch size may need to be adjusted.
 
 
-def get_device_memory(device: int = 0):
-    """return standard VRAM on cuda device"""
-    return int(torch.cuda.get_device_properties(device).total_memory / 1e9 // 1)
+    """
+    return (n_segments * 2.01708461e-07 + 5.93515514e-08) * n_samples
+
+
+def get_available_memory(device: int = 0):
+    """return VRAM available on a device in GB"""
+
+    assert torch.cuda.is_available(), "CUDA is not available"
+
+    return (torch.cuda.get_device_properties(device).total_memory
+            - torch.cuda.memory_allocated(device)) / 1024 ** 3
+
+
+def get_segment_batch_size(n_samples, device: int = 0):
+
+    mem = get_available_memory() - 2  # torch seems to need atleast 2 GB more than
+
+    return int(((mem / n_samples) - 5.93515514e-08) / 2.01708461e-07)
 
 
 def writhe_segments_cuda(segments, xyz, device: int = 0):
     segments = segments.unsqueeze(0) if segments.ndim < 2 else segments
     smat = (xyz.unsqueeze(0) if xyz.ndim < 3 else xyz)[:, segments]
-    result = writhe_segments(smat=smat.to(device)).cpu()
-    del smat
+    result = writhe_smat(smat=smat, device=device)
     torch.cuda.empty_cache()
     return result
 
@@ -249,7 +296,8 @@ class WritheMessage(nn.Module):
 
     def compute_writhe(self, x):
         return self.embed_writhe(
-            writhe_segments(self.segments, x.x.reshape(-1, self.n_atoms, 3))
+            writhe_segments(segments=self.segments,
+                            xyz=x.x.reshape(-1, self.n_atoms, 3))
         ).repeat(1, 2, 1).reshape(-1, self.n_features)
 
     def forward(self, x, update=True):

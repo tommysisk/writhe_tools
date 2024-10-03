@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 import deeptime
 from .utils import (save_dict,
                     load_dict,
-                    get_color_list
                     )
+from .plots import get_color_list
 
 
 def reindex_msm(dtrajs: np.ndarray,

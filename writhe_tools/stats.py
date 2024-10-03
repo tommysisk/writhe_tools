@@ -1,5 +1,6 @@
 import numpy as np
 import scipy
+from scipy import interpolate
 from sklearn.cluster import KMeans
 from .utils import group_by, sort_indices_list
 
@@ -76,6 +77,13 @@ def pmf(x: "list of arrays or array",
             return pmf1d(x[0], bins, weights, norm, range)
         else:
             return pmfdd(x, bins, weights, norm, range)
+
+
+def smooth_hist(x, bins=70, samples=10000):
+    p, _, _, edges = pmf(x, bins, norm=True)
+    f = interpolate.interp1d(edges, p, kind="cubic")
+    x = np.linspace(edges[0], edges[-1], samples)
+    return x, f(x)
 
 
 def Kmeans(p, n_clusters, n_dim, return_all: bool = False):
