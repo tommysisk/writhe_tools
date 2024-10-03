@@ -478,12 +478,12 @@ class Writhe:
                      "This method will correctly handle tick labels to account for the length used to compute writhe")
 
             else:
-                labels = np.arange(0, self.n_points - self.length)
+                labels = np.arange(0, self.n_points)
 
             rotation = 90 if key == "xticks" else None
 
             labels = labels[:-self.length][np.linspace(0,
-                                                       self.n_points-self.length-2,
+                                                       self.n_points-self.length-1,
                                                        (self.n_points-self.length-1) // label_stride).astype(int)
                                           ]
 
