@@ -142,7 +142,7 @@ def mi(x,
     When working with the same dataset assigned two sets of labels, x and y,
     we compute the mutual information with many normalization options.
 
-       """
+    """
 
     pxy = pmf([x, y], bins=bins, weights=weights, norm=True)
 
