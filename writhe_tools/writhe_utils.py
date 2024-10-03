@@ -106,7 +106,7 @@ def writhe_smat(smat: torch.Tensor, device: int = 0):
 
     del crosses
 
-    return (omega * signs / (2 * torch.pi)).cpu()
+    return torch.squeeze((omega * signs) / (2 * torch.pi)).cpu()
 
 
 def peak_mem_writhe(n_segments, n_samples):
