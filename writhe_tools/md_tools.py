@@ -88,6 +88,7 @@ class ResidueDistances:
              dscr: str = "",
              label_stride: int = 3,
              font_scale: int = 1,
+             cmap: str = "jet",
              line_plot_args: dict = None,
              ax=None):
 
@@ -134,7 +135,8 @@ class ResidueDistances:
                             "cbar_label": cbar_label,
                             "label_stride": label_stride,
                             "font_scale": font_scale,
-                            "ax": ax}
+                            "ax": ax,
+                            "cmap" : cmap}
 
         if line_plot_args is None:
             return plot_distance_matrix(**matrix_plot_args)

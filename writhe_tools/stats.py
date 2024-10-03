@@ -86,7 +86,13 @@ def smooth_hist(x, bins=70, samples=10000):
     return x, f(x)
 
 
-def Kmeans(p, n_clusters, n_dim, return_all: bool = False):
+def Kmeans(p: np.ndarray,
+           n_clusters: int,
+           n_dim: int,
+           n_init: int = 10,
+           max_iter: int = 300,
+           init: str = "k-means++",
+           return_all: bool = False):
 
     """
     full return: dtraj, frames_cl, centers, kdist, kmeans
@@ -94,7 +100,8 @@ def Kmeans(p, n_clusters, n_dim, return_all: bool = False):
 
     p = np.copy(p[..., :n_dim])
     # use kmeans class from sklearn
-    kmeans = KMeans(n_clusters=n_clusters)
+    kmeans = KMeans(n_clusters=n_clusters, n_init=n_init,
+                    max_iter=max_iter, init=init)
     # fit the clustering, return labels
     dtraj = kmeans.fit_predict(p)
     # get distance from center for each frame

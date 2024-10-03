@@ -84,6 +84,28 @@ def triu_flat_indices(n: int, d0: int, d1: int = None):
     return flat_index(**args, n=n, d0=d0, triu=True).astype(int)
 
 
+def indices_stat(indices_list: list,
+                 obs: np.ndarray = None,
+                 stat: callable = np.mean,
+                 axis: int = None,
+                 max: bool = True):
+    """
+    returns : values, indices
+    """
+    stride = -1 if max else 1
+    if obs is None:
+        values = np.fromiter(map(len, indices_list), float)
+        indices = values.argsort()[::stride]
+        return values, indices
+
+    if (stat == np.mean) and (axis is not None):
+        stat = functools.partial(stat, axis=axis)
+
+    values = np.array([stat(obs[i]) for i in indices_list])
+    indices = values.argsort()[::stride]
+    return values, indices
+
+
 def group_by(keys: np.ndarray,
              values: np.ndarray = None,
              reduction: callable = None):
