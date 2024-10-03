@@ -76,9 +76,7 @@ def writhe_segments(segments: torch.Tensor = None,
                                    smat[:, :, 1] - smat[:, :, 0]),
                             displacements[:, :, 0]))
 
-    wr = (1 / (2 * torch.pi)) * (omega * signs)
-
-    return wr.squeeze()
+    return (omega * signs) / (2 * torch.pi)
 
 
 class WritheMessage(nn.Module):
