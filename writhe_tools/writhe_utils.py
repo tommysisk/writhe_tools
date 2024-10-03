@@ -168,3 +168,265 @@ def calc_writhe_parallel_cuda(segments: torch.Tensor,
         fxn = ray.remote(num_gpus=torch.cuda.device_count())(writhe_segments_minibatches)
         return torch.cat(ray.get([fxn.remote(segment_chunks=j, xyz=xyz_ref, device=i)
                                   for i, j in enumerate(minibatches)]), -1).numpy()
+
+#####################################    #####################################    #####################################     #####################################
+
+# def apply_attention(self, Q: callable, K: callable, V: callable, A: callable,
+#                     features: torch.Tensor, edges: torch.Tensor):
+#
+#     src_node, dst_node = (i.flatten() for i in self.edges)
+#
+#     attention_input = torch.cat([i(j) for i, j in
+#                                  zip([Q, K, V],
+#                                      [features[dst_node], features[src_node], edges])
+#                                  ], dim=-1)
+#
+#     logits = torch.exp(A(attention_input).flatten())
+#
+#     attention = (logits / scatter(logits, dst_node)[dst_node]).unsqueeze(-1)
+#
+#     return scatter(edges * attention, dst_node, dim=0)
+
+# def get_twist_edges(n: int):
+#     segments = np.concatenate([shifted_pairs(np.arange(1, n - 1), 1), shifted_pairs(np.arange(2, n), 1)])
+#     return torch.LongTensor(segments)
+#
+# @torch.jit.script
+# def compute_twist(xyz: torch.Tensor):
+#     s = nnorm(xyz[:, 1:] - xyz[:, :-1])
+#     p = nnorm(ncross(s[:, 1:], s[:, :-1]))
+#     return torch.arccos(ndot(p[:, :1], p[:, 1:])) * torch.sign(ndot(p[:, :1], s[:, 1:-1])) / torch.pi
+#
+# class MLP(torch.nn.Module):
+#     def __init__(self, f_in, f_hidden, f_out, skip_connection=False):
+#         super().__init__()
+#         self.skip_connection = skip_connection
+#
+#         self.mlp = torch.nn.Sequential(
+#             torch.nn.Linear(f_in, f_hidden),
+#             torch.nn.LayerNorm(f_hidden),
+#             torch.nn.SiLU(),
+#             torch.nn.Linear(f_hidden, f_hidden),
+#             torch.nn.LayerNorm(f_hidden),
+#             torch.nn.SiLU(),
+#             torch.nn.Linear(f_hidden, f_out),
+#         )
+#
+#     def forward(self, x):
+#         if self.skip_connection:
+#             return x + self.mlp(x)
+#
+#         return self.mlp(x)
+#
+#
+# class TwistMessage(nn.Module):
+#     def __init__(self,
+#                  n_atoms: int,
+#                  n_features: int,
+#                  batch_size: int,
+#                  bins: int = 100,
+#                  bin_start: float = -1,
+#                  bin_end: float = 1,
+#                  ):
+#         super().__init__()
+#
+#         self.soft_one_hot = partial(soft_one_hot_linspace,
+#                                     start=bin_start,
+#                                     end=bin_end,
+#                                     number=bins,
+#                                     basis="gaussian",
+#                                     cutoff=False)
+#
+#         std = 1. / math.sqrt(n_features)
+#
+#         self.register_parameter("basis",
+#                                 torch.nn.Parameter(torch.Tensor(1, 1, bins, n_features).normal_(-std, std),
+#                                                    requires_grad=True)
+#                                 )
+#
+#         edges = get_twist_edges(n_atoms).T
+#         self.register_buffer("edges", torch.cat([i * n_atoms + edges for i in range(batch_size)], axis=1).long())
+#
+#         self.query = nn.Sequential(nn.Linear(n_features, n_features), nn.LeakyReLU())
+#         self.key = nn.Sequential(nn.Linear(n_features, n_features), nn.LeakyReLU())
+#         self.value = nn.Sequential(nn.Linear(n_features, n_features), nn.LeakyReLU())
+#         self.attention = nn.Sequential(nn.Linear(int(3 * n_features), 1), nn.LeakyReLU())
+#
+#
+#
+#         #self.mlp = MLP(n_features, n_features, n_features)
+#
+#         self.n_features = n_features
+#
+#         self.register_buffer("n_atoms_", torch.LongTensor([n_atoms]))
+#
+#         self.register_buffer("batch_size_", torch.LongTensor([batch_size]))
+#
+#     @property
+#     def n_atoms(self):
+#         return self.n_atoms_.item()
+#
+#     def forward(self, batch):
+#         src_node, dst_node = self.edges
+#         features = batch.invariant_node_features.clone()
+#
+#         x = batch.x.clone().reshape(-1, self.n_atoms, 3)
+#
+#         twist = (self.soft_one_hot(compute_twist(x)).unsqueeze(-1) * self.basis).sum(-2).reshape(-1, self.n_features).repeat(2, 1)
+#
+#         attention_input = torch.cat([getattr(self, i)(j) for i, j in
+#                                      zip(["query", "key", "value"], [features[dst_node], features[src_node], twist])
+#                                      ], dim=-1)
+#
+#         weights = torch.exp(self.attention(attention_input).flatten())
+#
+#         attention = (weights / scatter(weights, dst_node)[dst_node]).unsqueeze(-1)
+#
+#         message = scatter(twist * attention, dst_node, dim=0)
+#
+#         batch.invariant_node_features = features + message
+#
+#         return batch
+#
+#
+# class KnotMessage(nn.Module):
+#     """
+#     Twist and Writhe message layer.
+#
+#     """
+#
+#     def __init__(self,
+#                  n_atoms: int,
+#                  n_features: int,
+#                  batch_size: int,
+#                  bins: int = 300,
+#                  node_feature: str = "invariant_node_features",
+#                  segment_length: int = 1,
+#                  bin_start: float = -0.3,
+#                  bin_end: float = 0.3,
+#                  residual: bool = True
+#                  ):
+#
+#         super().__init__()
+#
+#         # prerequisit information
+#         # writhe edges
+#         segments = get_segments(n_atoms, length=segment_length, tensor=True)
+#         writhe_edges = torch.cat([segments[:, [0, 2]], segments[:, [1, 3]]]).T
+#
+#         # twist edges
+#         twist_edges = get_twist_edges(n_atoms).T
+#         edges = torch.cat([writhe_edges, twist_edges], dim=-1)
+#
+#
+#         self.register_buffer("edges", torch.cat([i * n_atoms + edges for i in range(batch_size)], axis=1).long())
+#         self.register_buffer("segments", segments)
+#         self.register_buffer("n_atoms_", torch.LongTensor([n_atoms]))
+#         self.register_buffer("batch_size_", torch.LongTensor([batch_size]))
+#         #self.register_buffer("segment_length", torch.LongTensor([segment_length]))
+#
+#         self.node_feature = node_feature
+#         self.n_features = n_features
+#         self.residual = residual
+#         self.bin_start = bin_start
+#         self.bin_end = bin_end
+#
+#         # writhe embedding
+#
+#         self.soft_one_hot_writhe = partial(soft_one_hot_linspace,
+#                                     start=self.bin_start,
+#                                     end=self.bin_end,
+#                                     number=bins,
+#                                     basis="gaussian",
+#                                     cutoff=False)
+#
+#         self.soft_one_hot_twist = partial(soft_one_hot_linspace,
+#                                           start=self.bin_start,
+#                                           end=self.bin_end,
+#                                           number=bins,
+#                                           basis="gaussian",
+#                                           cutoff=False)
+#
+#         std = 1. / math.sqrt(n_features)
+#
+#         self.register_parameter("writhe_basis",
+#                                 torch.nn.Parameter(torch.Tensor(1, 1, bins, n_features).uniform_(-std, std),
+#                                                    # normal_(0, std),
+#                                                    requires_grad=True)
+#                                 )
+#
+#
+#         self.register_parameter("twist_basis",
+#                                 torch.nn.Parameter(torch.Tensor(1, 1, bins, n_features).uniform_(-std, std),
+#                                                    # normal_(0, std),
+#                                                    requires_grad=True)
+#                                 )
+#
+#         # attention mechanism
+#
+#         self.query = nn.Sequential(nn.Linear(n_features, n_features), nn.LeakyReLU())
+#         self.key = nn.Sequential(nn.Linear(n_features, n_features), nn.LeakyReLU())
+#         self.value = nn.Sequential(nn.Linear(n_features, n_features), nn.LeakyReLU())
+#
+#
+#         # self.query = nn.Sequential(nn.Linear(n_features, n_features), nn.SiLU())
+#         # self.key = nn.Sequential(nn.Linear(n_features, n_features), nn.SiLU())
+#         # self.value = nn.Sequential(nn.Linear(n_features, n_features), nn.Tanh())
+#
+#         # self.query = nn.Linear(n_features, n_features)
+#         # self.key = nn.Linear(n_features, n_features)
+#         # self.value = nn.Linear(n_features, n_features)
+#
+#         self.attention = nn.Sequential(nn.Linear(int(3 * n_features), 1), nn.LeakyReLU())
+#
+#     @property
+#     def n_atoms(self):
+#         return self.n_atoms_.item()
+#
+#     def embed_writhe(self, wr):
+#         return (self.soft_one_hot_writhe(wr).unsqueeze(-1) * self.writhe_basis).sum(-2)
+#
+#     def embed_twist(self, tw):
+#         return (self.soft_one_hot_twist(tw).unsqueeze(-1) * self.twist_basis).sum(-2)
+#
+#     def compute_writhe(self, x):
+#         return self.embed_writhe(
+#                writhe_segments(self.segments, x.x.reshape(-1, self.n_atoms, 3))
+#                ).repeat(1, 2, 1).reshape(-1, self.n_features)
+#
+#     def compute_twist(self, x):
+#         return self.embed_twist(
+#                compute_twist(x.x.reshape(-1, self.n_atoms, 3))
+#                ).repeat(1, 2, 1).reshape(-1, self.n_features)
+#
+#     def forward(self, x, update=True):
+#
+#         features = getattr(x, self.node_feature).clone()
+#
+#         src_node, dst_node = (i.flatten() for i in self.edges)
+#
+#         writhe = self.compute_writhe(x)
+#
+#         twist = self.compute_twist(x)
+#
+#         dscrs = torch.cat([writhe, twist], dim=0)
+#
+#         attention_input = torch.cat([getattr(self, i)(j) for i, j in
+#                                      zip(["query", "key", "value"], [features[dst_node], features[src_node], dscrs])
+#                                      ], dim=-1)
+#
+#         weights = torch.exp(self.attention(attention_input).flatten())
+#
+#         attention = (weights / scatter(weights, dst_node)[dst_node]).unsqueeze(-1)
+#
+#         message = scatter(dscrs * attention, dst_node, dim=0)
+#
+#         if update:
+#
+#             x[self.node_feature] = features + message if self.residual else message
+#
+#             return x
+#
+#         else:
+#             return features + message if self.residual else message
+
