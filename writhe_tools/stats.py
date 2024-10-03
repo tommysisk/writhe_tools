@@ -115,3 +115,72 @@ def Kmeans(p: np.ndarray,
 
     # return dtraj and frames for each cluster sorted by distance from centroids
     return (dtraj, frames_cl, centers, kdist, kmeans) if return_all else (dtraj, frames_cl)
+
+
+def adjust_min(x):
+    idx = np.where(x == 0)
+    x[idx] = x[x != 0].min()
+    return x / x.sum()
+
+
+def H(p, weight: bool = True):
+    """ENTROPY!"""
+    p = p[p != 0]
+    p /= p.sum()
+    return -np.sum(p * np.log2(p)) if weight else -np.sum(np.log2(p))
+
+
+def mi(x,
+       y,
+       bins: int = 50,
+       weights: np.ndarray = None,
+       min_count: int = None,
+       shift_min: bool = False,
+       norm: str = "product"):
+
+    """
+    When working with the same dataset assigned two sets of labels, x and y,
+    we compute the mutual information with many normalization options.
+
+       """
+
+    pxy = pmf([x, y], bins=bins, weights=weights, norm=True)
+
+    if shift_min:
+
+        """add small amount to probabilities with zero weight.
+           This avoids the need to remove bins from the distributions.
+           Weights are renormalized after addition.
+           As a result, we can do our math in matrix form :)
+            """
+
+        pxy = adjust_min(pxy)
+
+        px, py = pxy.sum(1), pxy.sum(0)
+
+        info = pxy * np.log2(np.diag(1 / px) @ pxy @ np.diag(1 / py))
+
+    else:
+
+        """Only consider non-zero bins. Renormalizes distributions after removing zeros.
+           This gives same result as SKLearn but we can factor in weights using cluster
+           similarity function"""
+
+        i, j = np.where(pxy != 0) if min_count is None else np.where(pxy >= min_count)
+
+        px, py = pxy.sum(1), pxy.sum(0)
+
+        pij = pxy[i, j]
+
+        info = pij * np.log2(pij / (px[i] * py[j]))
+
+    norm = 2 * len(pxy) if norm == "state" \
+        else np.log2(len(x)) if norm == "sample" \
+        else (H(px) + H(py)) / 2 if norm == "sum" \
+        else np.sqrt(H(px)) * np.sqrt(H(py)) if norm == "product" \
+        else max(H(px), H(py)) if norm == "max" \
+        else min(H(px), H(py)) if norm == "min" \
+        else H(pxy, weight=True) if norm == "joint" \
+        else 1
+
+    return info / norm
