@@ -1,4 +1,4 @@
-## Code accompanying the paper, 'On the application of knot theoretic descriptions of proteins to dynamics and generative modeling'
+## Code accompanying the paper, 'On the application of knot theoretic descriptions of proteins to dynamic and generative modeling'
 
 
 <p align="center" style="font-size:40px;">
