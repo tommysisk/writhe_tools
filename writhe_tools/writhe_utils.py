@@ -1,9 +1,8 @@
 
 import torch
 import torch.nn as nn
-import numpy as np
 import ray
-from .utils import split_list, shifted_pairs, product, combinations
+from .utils import split_list, get_segments
 from .writhe_nn import ndot, ncross, nnorm, writhe_segments
 
 
@@ -17,34 +16,6 @@ from .writhe_nn import ndot, ncross, nnorm, writhe_segments
 #
 # dx = nnorm((-smat[:, :, :2, None, :] + smat[:, :, None, 2:, :]).reshape(-1, n_segments, 4, 3)) #displacements
 # omega = (-torch.arcsin(uproj(dx[:, :, indices[:,:-1]], dx[:, :, indices[:, -1], None]).prod(dim=-2).sum(-1).clip(-1, 1))).sum(-1)
-
-def get_segments(n: int = None,
-                 length: int = 1,
-                 index0: np.ndarray = None,
-                 index1: np.ndarray = None,
-                 tensor: bool = False):
-    """
-    Function to retrieve indices of segment pairs for various use cases.
-    Returns an (n_segment_pairs, 4) array where each row (quadruplet) contains : (start1, end1, start2, end2)
-    """
-
-    if all(i is None for i in (index0, index1)):
-        assert n is not None, \
-            "Must provide indices (index0:array, (optionally) index1:array) or the number of points (n: int)"
-        segments = combinations(shifted_pairs(np.arange(n), length)).reshape(-1, 4)
-        segments = segments[~(segments[:, 1] == segments[:, 2])]
-        return torch.from_numpy(segments).long() if tensor else segments
-
-    else:
-        assert index0 is not None, ("If providing only one set of indices, must set the index0 argument \n"
-                                    "Cannot only supply the index1 argument (doesn't make sense in this context")
-        if index1 is not None:
-            segments = product(*[shifted_pairs(i, length) for i in (index0, index1)]).reshape(-1, 4)
-            return torch.from_numpy(segments).long() if tensor else segments
-        else:
-            segments = combinations(shifted_pairs(index0, length)).reshape(-1, 4)
-            segments = segments[~(segments[:, 1] == segments[:, 2])]
-            return torch.from_numpy(segments).long() if tensor else segments
 
 
 class TorchWrithe(nn.Module):

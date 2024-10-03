@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch_scatter import scatter
 import math
-from .writhe_utils import get_segments
+from .utils import get_segments
 from functools import partial
 
 
