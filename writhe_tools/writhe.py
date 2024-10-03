@@ -291,11 +291,12 @@ class Writhe:
             segments = get_segments(n=n_points, length=length)
 
             with Timer():
-                if cuda:
+                if cuda and torch.cuda.is_available():
                     _ = calc_writhe_parallel_cuda(segments=torch.from_numpy(segments),
                                                   xyz=torch.from_numpy(xyz))
 
                 else:
+                    if cuda: print("You tried to use CUDA but it's not available according to torch, defaulting to CPUs.")
                     _ = calc_writhe_parallel(segments=segments, xyz=xyz, cpus_per_job=cpus_per_job)
             return None
 
@@ -312,6 +313,7 @@ class Writhe:
             results["writhe_features"] = calc_writhe_parallel_cuda(segments=torch.from_numpy(segments),
                                                                    xyz=torch.from_numpy(xyz))
         else:
+            if cuda: print("You tried to use CUDA but it's not available according to torch, defaulting to CPUs.")
             results["writhe_features"] = calc_writhe_parallel(segments=segments, xyz=xyz)
 
         results["segments"] = segments
