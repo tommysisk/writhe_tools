@@ -98,7 +98,7 @@ def indices_stat(indices_list: list,
         indices = values.argsort()[::stride]
         return values, indices
 
-    if (stat == np.mean) and (axis is not None):
+    if axis is not None:
         stat = functools.partial(stat, axis=axis)
 
     values = np.array([stat(obs[i]) for i in indices_list])
