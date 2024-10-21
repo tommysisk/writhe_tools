@@ -46,7 +46,6 @@ def pmfdd(arrays: "a list of arrays or N,d numpy array",
                                                         expand_binnumbers=True,
                                                         range=range)
 
-
     # if range is not None:
     #     idx = np.stack([np.digitize(value, edge[1:-1]) for edge, value in zip(edges, arrays.T)]) + 1
 
@@ -79,8 +78,11 @@ def pmf(x: "list of arrays or array",
             return pmfdd(x, bins, weights, norm, range)
 
 
-def smooth_hist(x, bins=70, samples=10000):
-    p, _, _, edges = pmf(x, bins, norm=True)
+from .utils import reindex_list
+
+
+def smooth_hist(x: np.ndarray, bins: int = 70, samples: int = 10000, norm: bool = True):
+    p, edges = reindex_list(pmf(x, bins, norm=norm), [0, -1])
     f = interpolate.interp1d(edges, p, kind="cubic")
     x = np.linspace(edges[0], edges[-1], samples)
     return x, f(x)
@@ -93,7 +95,6 @@ def Kmeans(p: np.ndarray,
            max_iter: int = 300,
            init: str = "k-means++",
            return_all: bool = False):
-
     """
     full return: dtraj, frames_cl, centers, kdist, kmeans
     """
@@ -137,7 +138,6 @@ def mi(x,
        min_count: int = None,
        shift_min: bool = False,
        norm: str = "product"):
-
     """
     When working with the same dataset assigned two sets of labels, x and y,
     we compute the mutual information with many normalization options.

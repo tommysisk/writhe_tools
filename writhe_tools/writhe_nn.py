@@ -1,11 +1,9 @@
 #!/usr/bin/env python
-from typing import List, Any
 import torch
 import torch.nn as nn
 from torch_scatter import scatter
 import math
-from .utils import get_segments
-from functools import partial
+from .utils import get_segments, flat_index
 
 
 @torch.jit.script
@@ -42,7 +40,77 @@ def uproj(a, b, norm_b: bool = True, norm_proj: bool = True):
 
 
 @torch.jit.script
-def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor,):
+def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor, ):
+    """
+    Compute the writhe (signed crossing) of 2 segment pairs for NSegments and all frames (index 0) in xyz
+    (xyz can contain just one frame).
+
+    **Arguments**:
+    - segments: Array of shape (Nsegments, 4) giving the indices of the 4 alpha carbons in xyz creating 2 segments:
+      array(Nframes, [seg1_start_point, seg1_end_point, seg2_start_point, seg2_end_point]).
+      Segments can be one-dimensional if only one value of writhe is to be computed.
+    - xyz: Array of shape (Nframes, N_alpha_carbons, 3), coordinate array giving the positions of all alpha carbons.
+
+    The program uses complex indexing to minimize the number of required computations.
+    It makes use of the following identities :
+
+    Assume that a, b, c, d are normalized vectors in R^3:
+
+         a.cross(b) · c.cross(d)  /  ||a.cross(b)|| * ||c.cross(d)||
+
+
+        = [(a · c) * (b · d) - (a · d) * (b · c)] / sqrt( (1 - (a · b)**2) * (1 - (c · d)**2) )
+
+    In the special case where b == c:
+
+        = [(a · b) * (b · d) - (a · d) * ||b||**2 ] / sqrt( (1 - (a · b)**2) * (1 - (b · d)**2) )
+
+    Note that ||b||**2 == 1.
+
+    Define u = (a · b), v = (b · d), s = (a · d)
+
+    Thus, compute u, v and s and use them twice in the scalar function:
+
+        = (u * v - s) / sqrt( (1 - u**2) * (1 - v**2) )
+
+    This formulation results in computing the writhe with 6 dot products and a determinant per crossing.
+
+    """
+
+    # ensure correct shape for segment for lazy arguments
+    assert segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
+
+    segments = segments.unsqueeze(0) if segments.ndim < 2 else segments
+
+    xyz = xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
+
+    dx = nnorm((-xyz[:, segments[:, :2], None] + xyz[:, segments[:, None, 2:]]
+                ).reshape(-1, len(segments), 4, 3))
+
+    dots = (dx[:, :, [0, 0, 0, 1, 1, 2]] * dx[:, :, [1, 2, 3, 2, 3, 3]]).sum(-1)
+
+    # gross but follows from identities cleanly
+
+    u, v, h = [0, 4, 5, 1], \
+              [4, 5, 1, 0], \
+              [2, 3, 2, 3]
+
+    omega = ((dots[:, :, u] * dots[:, :, v] - dots[:, :, h])
+             / torch.sqrt(((1 - dots[:, :, u] ** 2) * (1 - dots[:, :, v] ** 2)).abs())). \
+           clip(-1, 1).arcsin().sum(-1)
+
+    signs = torch.sign(
+        torch.linalg.det(
+            torch.stack([dx[:, :, 0],
+                         xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
+                         xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]]],
+                        -1)))
+
+    return torch.squeeze(omega * signs) / (2 * torch.pi)
+
+
+@torch.jit.script
+def writhe_segments_(xyz: torch.Tensor, segments: torch.Tensor,):
 
     """
     compute the writhe (signed crossing) of 2 segment pairs for NSegments and all frames (index 0) in xyz (xyz can contain just one frame)
@@ -77,6 +145,8 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor,):
     return torch.squeeze(omega * signs) / (2 * torch.pi)
 
 
+
+
 class WritheMessage(nn.Module):
     """
     Expedited Writhe message layer.
@@ -87,12 +157,15 @@ class WritheMessage(nn.Module):
                  n_atoms: int,
                  n_features: int,
                  batch_size: int,
-                 bins: int = 20,
-                 node_feature: str = "invariant_node_features",
+                 bins: int = 100,
+                 node_attr: str = "invariant_node_features",
+                 distance_attr: str = "edge_dist",
                  segment_length: int = 1,
-                 bin_start: float = 1,
-                 bin_end: float = -1,
-                 activation: callable = nn.LeakyReLU,
+                 gaussian_bins: bool = False,
+                 bin_low: float = -1,
+                 bin_high: float = 1,
+                 bin_std: float = 1,
+                 bin_mean: float = 0,
                  residual: bool = True
                  ):
 
@@ -103,69 +176,72 @@ class WritheMessage(nn.Module):
         edges = torch.cat([segments[:, [0, 2]], segments[:, [1, 3]]]).T
         # edges = torch.cat([edges, torch.flip(edges, (0,))], dim=1) # this doesn't help
 
-        self.register_buffer("edges", torch.cat([i * n_atoms + edges for i in range(batch_size)], axis=1).long())
+        if distance_attr is not None:
+            # if a batch already contains all the pairwise Euclidian distances,
+            # fetch them on the fly using flattened indices
+
+            dist_index = flat_index(*edges, n=n_atoms, d0=1)
+            increment = int(n_atoms ** 2 - n_atoms)
+            self.register_buffer("distance_indices",
+                                 torch.cat([i * increment + dist_index for i in range(batch_size)]))
+
+        self.register_buffer("edges",
+                             torch.cat([i * n_atoms + edges for i in range(batch_size)], axis=1).long())
         self.register_buffer("segments", segments)
         self.register_buffer("n_atoms_", torch.LongTensor([n_atoms]))
         self.register_buffer("batch_size_", torch.LongTensor([batch_size]))
         self.register_buffer("segment_length", torch.LongTensor([segment_length]))
 
-        self.node_feature = node_feature
+        self.node_attr = node_attr
+        self.distance_attr = distance_attr
         self.n_features = n_features
         self.residual = residual
-        self.bin_start = bin_start
-        self.bin_end = bin_end
+        self.bin_low = bin_low
+        self.bin_high = bin_high
 
         # writhe embedding
 
-        self.soft_one_hot = partial(soft_one_hot_linspace,
-                                    start=self.bin_start,
-                                    end=self.bin_end,
-                                    number=bins,
-                                    basis="gaussian",
-                                    cutoff=False)
+        self.soft_one_hot = GaussEncoder(low=self.bin_low,
+                                         high=self.bin_high,
+                                         number=bins,
+                                         gauss=gaussian_bins,
+                                         std=bin_std,
+                                         mu=bin_mean)
 
-        std = 2 / bins  # 1. / math.sqrt(n_features) # this is how torch initializes embedding layers
+        std = 1. / math.sqrt(n_features)  # 2 / bins,  this is how torch initializes embedding layers
 
         self.register_parameter("basis",
-                                torch.nn.Parameter(torch.Tensor(1, 1, bins, n_features).normal_(0, std),
-                                                   # uniform_(-std, std),
-                                                   requires_grad=True)
+                                torch.nn.Parameter(
+                                    torch.Tensor(1, 1, bins, n_features).uniform_(-std, std),  # normal_(0, std)
+                                    requires_grad=True)
                                 )
-
-        # attention mechanism
-
-        self.query = nn.Sequential(nn.Linear(n_features, n_features), activation())
-        self.key = nn.Sequential(nn.Linear(n_features, n_features), activation())
-        self.value = nn.Sequential(nn.Linear(n_features, n_features), activation())
-
-        self.attention = nn.Sequential(nn.Linear(int(3 * n_features), 1), activation())
 
     @property
     def n_atoms(self):
         return self.n_atoms_.item()
 
     def embed_writhe(self, wr):
-        return (self.soft_one_hot(wr).unsqueeze(-1) * self.basis).sum(-2)
+        return (self.soft_one_hot(wr).unsqueeze(-1) * self.basis.clone()).sum(-2)
 
     def compute_writhe(self, x):
         return self.embed_writhe(writhe_segments(xyz=x.x.reshape(-1, self.n_atoms, 3),
-                                                 segments=self.segments,)
+                                                 segments=self.segments)
                                  ).repeat(1, 2, 1).reshape(-1, self.n_features)
 
     def forward(self, x, update=True):
-        features = getattr(x, self.node_feature).clone()
 
         src_node, dst_node = (i.flatten() for i in self.edges)
 
         writhe = self.compute_writhe(x)
 
-        attention_input = torch.cat([getattr(self, i)(j) for i, j in
-                                     zip(["query", "key", "value"], [features[dst_node], features[src_node], writhe])
-                                     ], dim=-1)
+        # derive attention weights from distances
+        if self.distance_attr is not None:
+            if hasattr(x, self.distance_attr):
+                logits = -1 * getattr(x, self.distance_attr)[self.distance_indices]
 
-        logits = self.attention(attention_input).flatten()
-
-        logits = logits - logits.max()  # added numerical stability without effecting output by properties of softmax
+        else:
+            # if no distances computed, compute them
+            logits = -1 * (x.x[src_node] - x.x[dst_node]).norm(dim=-1)
 
         weights = torch.exp(logits)
 
@@ -175,13 +251,203 @@ class WritheMessage(nn.Module):
 
         if update:
 
-            x[self.node_feature] = features + message if self.residual else message
+            x[self.node_attr] = x[self.node_attr] + message if self.residual else message
 
             return x
 
         else:
-            return features + message if self.residual else message
+            return x[self.node_attr] + message if self.residual else message
 
+
+class GaussEncoder(nn.Module):
+    def __init__(self,
+                 low: float,
+                 high: float,
+                 number: int,
+                 gauss: bool = False,
+                 std: float = 1,
+                 mu: float = 0):
+
+        super().__init__()
+
+        if gauss:
+            self.register_buffer("step_", torch.diff(gaussian_binning(low, high, number, std, mu)))
+            self.register_buffer("bin_centers", gaussian_binning(low, high, number - 1, std, mu))
+
+        else:
+            bins = torch.linspace(low, high, number)
+            self.register_buffer("step_", torch.Tensor([bins[1] - bins[0]]))
+            self.register_buffer("bin_centers", bins)
+
+    @property
+    def step(self):
+        return self.step_.item() if len(self.step_) == 1 else self.step_
+
+    def forward(self, x):
+
+        diff = (x[..., None] - self.bin_centers) / self.step
+
+        return diff.pow(2).neg().exp().div(1.12)
+
+
+def gaussian_binning(low: float,
+                     high: float,
+                     number: int,
+                     std: float = 1,
+                     mean: float = 0):
+    """
+    Creates symmetric non-uniform bins where bin
+    widths are proportional to the height of a Gaussian distribution.
+
+    Parameters:
+    - low: low of the interval.
+    - high: high of the interval.
+    - number: Number of bins.
+    - std: Standard deviation of the Gaussian distribution.
+    - mean: Mean of the Gaussian distribution.
+
+    Returns:
+    - bin_edges: Tensor of bin edges (length: num_bins + 1), symmetric and in increasing order.
+    """
+    number += 2
+    # Generate a Gaussian PDF over the specified symmetric range
+    x = torch.linspace(low, high, 500000)  # we only compute this once
+    pdf = torch.distributions.Normal(loc=mean, scale=std).log_prob(x).exp()
+    # Normalize the PDF so that it sums to 1
+    pdf /= torch.sum(pdf)
+    # Create a cumulative sum to represent the integral of the PDF
+    pdf_cumsum = torch.cumsum(pdf, dim=0)
+    # Target cumulative values for bin edges (0 to 1) evenly spaced
+    target_cdf_vals = torch.linspace(0 - 1 / number,
+                                     1 + 1 / number,
+                                     number + 1)
+
+    # Find where the target CDF values map onto the cumulative PDF
+    indices = torch.searchsorted(pdf_cumsum, target_cdf_vals).clamp(0, len(x) - 1)
+
+    # Linear interpolation for bin edge determination
+    x0 = x[indices - 1].clamp(min=low)  # Lower bound for interpolation
+    x1 = x[indices].clamp(max=high)  # Upper bound for interpolation
+    y0 = pdf_cumsum[indices - 1].clamp(min=0)  # Corresponding CDF values
+    y1 = pdf_cumsum[indices].clamp(max=1)  # Next CDF values
+
+    # Linear interpolation formula for bin edges
+    bin_edges = x0 + (target_cdf_vals - y0) * (x1 - x0) / (y1 - y0 + 1e-9)
+
+    # To create symmetric bin edges about the mean
+    left_half = mean - (bin_edges - mean)  # Reflect bin edges about the mean
+    full_bin_edges = torch.cat((left_half.flip(0), bin_edges))
+
+    # Ensure we only take 'number + 1' edges and sort them
+    full_bin_edges = full_bin_edges[:number]
+    final_bin_edges = torch.sort(full_bin_edges)[0]
+
+    return final_bin_edges[1:]
+
+
+# class WritheMessage(nn.Module):
+#     """
+#     Expedited Writhe message layer.
+#
+#     """
+#
+#     def __init__(self,
+#                  n_atoms: int,
+#                  n_features: int,
+#                  batch_size: int,
+#                  bins: int = 100,
+#                  node_feature: str = "invariant_node_features",
+#                  segment_length: int = 1,
+#                  bin_start: float = 1,
+#                  bin_end: float = -1,
+#                  activation: callable = nn.LeakyReLU,
+#                  residual: bool = True
+#                  ):
+#
+#         super().__init__()
+#
+#         # prerequisit information
+#         segments = get_segments(n_atoms, length=segment_length, tensor=True)
+#         edges = torch.cat([segments[:, [0, 2]], segments[:, [1, 3]]]).T
+#         # edges = torch.cat([edges, torch.flip(edges, (0,))], dim=1) # this doesn't help
+#
+#         self.register_buffer("edges", torch.cat([i * n_atoms + edges for i in range(batch_size)], axis=1).long())
+#         self.register_buffer("segments", segments)
+#         self.register_buffer("n_atoms_", torch.LongTensor([n_atoms]))
+#         self.register_buffer("batch_size_", torch.LongTensor([batch_size]))
+#         self.register_buffer("segment_length", torch.LongTensor([segment_length]))
+#
+#         self.node_feature = node_feature
+#         self.n_features = n_features
+#         self.residual = residual
+#         self.bin_start = bin_start
+#         self.bin_end = bin_end
+#
+#         # writhe embedding
+#
+#         self.soft_one_hot = partial(soft_one_hot_linspace,
+#                                     start=self.bin_start,
+#                                     end=self.bin_end,
+#                                     number=bins,
+#                                     basis="gaussian",
+#                                     cutoff=False)
+#
+#         std = 1. / math.sqrt(n_features) #2 / bins  # # this is how torch initializes embedding layers
+#
+#         self.register_parameter("basis",
+#                                 torch.nn.Parameter(torch.Tensor(1, 1, bins, n_features).uniform_(-std, std), #normal_(0, std)
+#                                                    requires_grad=True)
+#                                 )
+#
+#         # attention mechanism
+#
+#         self.query = nn.Sequential(nn.Linear(n_features, n_features), activation())
+#         self.key = nn.Sequential(nn.Linear(n_features, n_features), activation())
+#         self.value = nn.Sequential(nn.Linear(n_features, n_features), activation())
+#
+#         self.attention = nn.Sequential(nn.Linear(int(3 * n_features), 1), activation())
+#
+#     @property
+#     def n_atoms(self):
+#         return self.n_atoms_.item()
+#
+#     def embed_writhe(self, wr):
+#         return (self.soft_one_hot(wr).unsqueeze(-1) * self.basis).sum(-2)
+#
+#     def compute_writhe(self, x):
+#         return self.embed_writhe(writhe_segments(xyz=x.x.reshape(-1, self.n_atoms, 3),
+#                                                  segments=self.segments,)
+#                                  ).repeat(1, 2, 1).reshape(-1, self.n_features)
+#
+#     def forward(self, x, update=True):
+#         features = getattr(x, self.node_feature).clone()
+#
+#         src_node, dst_node = (i.flatten() for i in self.edges)
+#
+#         writhe = self.compute_writhe(x)
+#
+#         attention_input = torch.cat([getattr(self, i)(j) for i, j in
+#                                      zip(["query", "key", "value"], [features[dst_node], features[src_node], writhe])
+#                                      ], dim=-1)
+#
+#         logits = self.attention(attention_input).flatten()
+#
+#         logits = logits - logits.max()  # added numerical stability without effecting output by properties of softmax
+#
+#         weights = torch.exp(logits)
+#
+#         attention = (weights / scatter(weights, dst_node)[dst_node]).unsqueeze(-1)
+#
+#         message = scatter(writhe * attention, dst_node, dim=0)
+#
+#         if update:
+#
+#             x[self.node_feature] = features + message if self.residual else message
+#
+#             return x
+#
+#         else:
+#             return features + message if self.residual else message
 
 
 class _SoftUnitStep(torch.autograd.Function):

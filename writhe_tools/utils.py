@@ -8,6 +8,9 @@ import time
 from numpy_indexed import group_by as group_by_
 import functools
 import gc
+import re
+import torch
+from collections import OrderedDict
 
 
 def split_list(lst, n):
@@ -51,23 +54,20 @@ def flat_index(i: "row idx",
     """retrieve index of data point in flattened matrix
     based on the indices the data point would have had in the unflattened matrix.
 
-    In the case of flattened upper diagonal matrix :
     If supdiagonals were removed from the original matrix before flattening, adjust
     the d0 input to account for it.
-    d0=0 means that the main diagonal was included in the original flattening"""
+    d0=0 means that the main diagonal was included in the original flattening
+
+    if the flattened matrix was upper triangular, use triu argument"""
 
     if m is None:
         m = n
-
     if triu:
         tri = i + d0
+        return i * m + j - (tri ** 2 + tri) / 2
     else:
-        tri = 0
-        assert d0 == 0, "if not a triu matrix, d0 should be 0"
+        return i * m + j - (i + 1) * d0
 
-    index = i * m + j - (tri ** 2 + tri) / 2
-
-    return index
 
 def triu_flat_indices(n: int, d0: int, d1: int = None):
     """convienience function for getting indices of values in
@@ -257,13 +257,13 @@ def profile_function(algorithm, *args, track_gpu=False, device=None):
         torch.cuda.synchronize()  # Make sure all GPU operations are done
         max_gpu_memory_used = torch.cuda.max_memory_allocated() / (1024 ** 2) / 1e3  # Peak GPU memory
     else:
-        gpu_memory_used = 0
         max_gpu_memory_used = 0
 
     # Compute execution time
     execution_time = end_time - start_time
 
     return execution_time, max_gpu_memory_used
+
 
 def gpu_stats():
     def list_tensors_on_gpu():
@@ -277,6 +277,79 @@ def gpu_stats():
     reserved_memory = torch.cuda.memory_reserved()
     print(f"Reserved memory: {reserved_memory / (1024 ** 2):.2f} MB")
     print(torch.cuda.memory_summary(device=None, abbreviated=False))
+
+
+def num_str(s, return_str=True, return_num=True):
+    s = ''.join(filter(str.isdigit, s))
+
+    if return_str and return_num:
+        return s, int(s)
+
+    if return_str:
+        return s
+
+    if return_num:
+        return int(s)
+
+
+def multireplace(string, replacements, ignore_case=False):
+    """
+    Given a string and a replacement map, it returns the replaced string.
+    :param str string: string to execute replacements on
+    :param dict replacements: replacement dictionary {value to find: value to replace}
+    :param bool ignore_case: whether the match should be case insensitive
+    :rtype: str
+    """
+    if not replacements:
+        # Edge case that'd produce a funny regex and cause a KeyError
+        return string
+    if ignore_case:
+        def normalize_old(s):
+            return s.lower()
+        re_mode = re.IGNORECASE
+    else:
+        def normalize_old(s):
+            return s
+        re_mode = 0
+    replacements = {normalize_old(key): val for key, val in replacements.items()}
+    rep_sorted = sorted(replacements, key=len, reverse=True)
+    rep_escaped = map(re.escape, rep_sorted)
+    pattern = re.compile("|".join(rep_escaped), re_mode)
+    return pattern.sub(lambda match: replacements[normalize_old(match.group(0))], string)
+
+
+def plain_state_dict(d, badwords=["module.","model."]):
+    replacements= dict(zip(badwords,[""]*len(badwords)))
+    new = OrderedDict()
+    for k, v in d.items():
+        name = multireplace(string=k, replacements=replacements, ignore_case=True)
+        new[name] = v
+    return new
+
+
+def load_state_dict(model, file):
+    try:
+        model.load_state_dict(plain_state_dict(torch.load(file)))
+
+    #if we're trying to load from lightning state dict
+
+    except:
+
+        model.load_state_dict(plain_state_dict(torch.load(file)["state_dict"]))
+
+    return model
+
+
+def get_metrics(path):
+    from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+    event_accumulator = EventAccumulator(path)
+    event_accumulator.Reload()
+    steps = {x.step for x in event_accumulator.Scalars("epoch")}
+    epoch = list(range(len(steps)))
+    train_loss, val_loss = [-np.array([x.value for x in event_accumulator.Scalars(_key) if x.step in steps]) for _key in
+                            ["train_loss","val_loss"]]
+    return np.array(epoch),train_loss, val_loss
+
 
 
 
