@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import IPython.utils.decorators
 import torch
 import torch.nn as nn
 from torch_scatter import scatter
@@ -12,31 +13,6 @@ def nnorm(x: torch.Tensor):
     return x / torch.linalg.norm(x, dim=-1, keepdim=True)
 
 
-@torch.jit.script
-def ncross(x: torch.Tensor, y: torch.Tensor):
-    """Convenience function for (batched) cross products of vectors stored in arrays with last dimension 3"""
-    return torch.cross(x, y, dim=-1)
-
-
-@torch.jit.script
-def ndot(x: torch.Tensor, y: torch.Tensor):
-    """Convenience function for (batched) dot products of vectors stored in arrays with last dimension 3"""
-    return torch.sum(x * y, dim=-1)
-
-
-@torch.jit.script
-def ndet(v1: torch.Tensor, v2: torch.Tensor, v3: torch.Tensor):
-    """for the triple product and finding the signed sin of the angle between v2 and v3, v1 should
-    be set equal to a vector mutually orthogonal to v2,v3"""
-    return ndot(v1, ncross(v2, v3))
-
-
-@torch.jit.script
-def uproj(a, b, norm_b: bool = True, norm_proj: bool = True):
-    b = nnorm(b) if norm_b else b
-    # faster than np.matmul when using ray
-    proj = a - b * (a * b).sum(dim=-1).unsqueeze(-1)
-    return nnorm(proj) if norm_proj else proj
 
 
 @torch.jit.script
@@ -67,82 +43,43 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor, ):
 
     Note that ||b||**2 == 1.
 
-    Define u = (a · b), v = (b · d), s = (a · d)
+    Set
+    u = (a · b),
+    v = (b · d),
+    h = (a · d)
+    and define the scalar function:
 
-    Thus, compute u, v and s and use them twice in the scalar function:
+       sin(theta - pi / 2) = (u * v - h) / sqrt( (1 - u**2) * (1 - v**2) )
 
-        = (u * v - s) / sqrt( (1 - u**2) * (1 - v**2) )
-
-    This formulation results in computing the writhe with 6 dot products and a determinant per crossing.
+    Precomputing dot products and recursive application of this formula to compute the
+    interior angles of the spherical quadrilateral allows computation of the writhe
+    with 6 dot products and a determinant per crossing.
 
     """
-
-    # ensure correct shape for segment for lazy arguments
+    # ensure shape for segments, xyz for lazy arguments
     assert segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
-
     segments = segments.unsqueeze(0) if segments.ndim < 2 else segments
-
     xyz = xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
-
-    dx = nnorm((-xyz[:, segments[:, :2], None] + xyz[:, segments[:, None, 2:]]
-                ).reshape(-1, len(segments), 4, 3))
-
+    # displacement vectors between end points
+    dx = nnorm((-xyz[:, segments[:, :2], None] + xyz[:, segments[:, None, 2:]]).reshape(-1, len(segments), 4, 3))
+    # compute all dot products then work with scalars
     dots = (dx[:, :, [0, 0, 0, 1, 1, 2]] * dx[:, :, [1, 2, 3, 2, 3, 3]]).sum(-1)
-
-    # gross but follows from identities cleanly
-
+    # indices
     u, v, h = [0, 4, 5, 1], \
               [4, 5, 1, 0], \
               [2, 3, 2, 3]
+    # surface area from scalars
+    theta = ((dots[:, :, u] * dots[:, :, v] - dots[:, :, h])
+             / torch.sqrt(((1 - dots[:, :, u] ** 2) * (1 - dots[:, :, v] ** 2)).abs().clip(1e-10))
+             ).clip(-1, 1).arcsin().sum(-1)
+    # signs
+    signs = (dx[:, :, 0] * torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
+                                       xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]], dim=-1)
+             ).sum(-1).sign()
 
-    omega = ((dots[:, :, u] * dots[:, :, v] - dots[:, :, h])
-             / torch.sqrt(((1 - dots[:, :, u] ** 2) * (1 - dots[:, :, v] ** 2)).abs())). \
-           clip(-1, 1).arcsin().sum(-1)
-
-    signs = torch.sign(
-        torch.linalg.det(
-            torch.stack([dx[:, :, 0],
-                         xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
-                         xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]]],
-                        -1)))
-
-    return torch.squeeze(omega * signs) / (2 * torch.pi)
+    return torch.squeeze(theta * signs) / (2 * torch.pi)
 
 
-@torch.jit.script
-def writhe_segments_(xyz: torch.Tensor, segments: torch.Tensor,):
-
-    """
-    compute the writhe (signed crossing) of 2 segment pairs for NSegments and all frames (index 0) in xyz (xyz can contain just one frame)
-
-    **provide both of the following**
-
-    segments:  array of shape (Nsegments, 4) giving the indices of the 4 alpha carbons in xyz creating 2 segments:::
-             array(Nframes, [seg1_start_point,seg1_end_point,seg2_start_point,seg2_end_point]).
-             We have the flexability for segments to simply be one dimensional if only one value of writhe is to be computed.
-
-    xyz: array of shape (Nframes, N_alpha_carbons, 3),coordinate array giving the positions of ALL the alpha carbons
-
-    """
-
-    # ensure correct shape for segment for lazy arguments
-    assert segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
-    segments = segments.unsqueeze(0) if segments.ndim < 2 else segments
-    smat = (xyz.unsqueeze(0) if xyz.ndim < 3 else xyz)[:, segments]
-
-    displacements = nnorm((-smat[:, :, :2, None, :] + smat[:, :, None, 2:, :]
-                           ).reshape(-1, smat.shape[1], 4, 3))
-
-    crosses = nnorm(ncross(displacements[:, :, [0, 1, 3, 2]], displacements[:, :, [1, 3, 2, 0]]))
-
-    omega = torch.arcsin(ndot(crosses[:, :, [0, 1, 2, 3]],
-                              crosses[:, :, [1, 2, 3, 0]]).clip(-1, 1)).sum(2)
-
-    signs = torch.sign(ndot(ncross(smat[:, :, 3] - smat[:, :, 2],
-                                   smat[:, :, 1] - smat[:, :, 0]),
-                            displacements[:, :, 0]))
-
-    return torch.squeeze(omega * signs) / (2 * torch.pi)
 
 
 
