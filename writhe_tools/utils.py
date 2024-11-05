@@ -9,8 +9,106 @@ from numpy_indexed import group_by as group_by_
 import functools
 import gc
 import re
-import torch
 from collections import OrderedDict
+import warnings
+import os
+import scipy
+
+
+def sort_strs(strs: list, max=False, indexed: bool = False):
+    """ strs ::: a list or numpy array of strings.
+        max ::: bool, to sort in terms of greatest index to smallest.
+        indexed ::: bool, whether or not to filter out strings that don't contain digits.
+                    if set to False and string list (strs) contains strings without a digit, function
+                    will return unsorted string list (strs) as an alternative to throwing an error."""
+
+    # we have to ensure that each str in strs contains a number otherwise we get an error
+    assert len(strs) > 0, "List of strings is empty"
+    check = np.vectorize(lambda s: any(map(str.isdigit, s)))
+
+    if isinstance(strs, list):
+        strs = np.array(strs)
+
+    # the indexed option allows us to filter out strings that don't contain digits.
+    ## This prevents an error
+    if indexed:
+        strs = strs[check(strs)]
+        assert len(strs) > 0, "List of strings is empty after filtering strings without digits"
+
+    # if indexed != True, then we don't filter the list of input strings and simply return it
+    ##because an attempt to sort on indices (digits) that aren't present results in an error
+    else:
+        if not all(check(strs)):
+            warnings.warn("Not all strings contain a number, returning unsorted input list to avoid throwing an error. "
+                          "If you want to only consider strings that contain a digit, set indexed to True ")
+
+            return strs
+
+    get_index = np.vectorize(functools.partial(num_str, return_str=False, return_num=True))
+    indices = get_index(strs).argsort()
+
+    if max:
+        return strs[np.flip(indices)]
+
+    else:
+        return strs[indices]
+
+
+def lsdir(dir,
+          keyword: "list or str" = None,
+          exclude: "list or str" = None,
+          match: callable = all,
+          indexed: bool = False):
+    """ full path version of os.listdir with files/directories in order
+
+        dir ::: path to a directory (str), required
+        keyword ::: filter out strings that DO NOT contain this/these substrings (list or str)=None
+        exclude ::: filter out strings that DO contain this/these substrings (list or str)=None
+        indexed ::: filter out strings that do not contain digits.
+                    Is passed to sort_strs function (bool)=False"""
+
+    if dir[-1] == "/":
+        dir = dir[:-1]
+
+    listed_dir = os.listdir(dir)
+
+    listed_dir = filter_strs(listed_dir, keyword=keyword, exclude=exclude, match=match)
+
+    return [f"{dir}/{i}" for i in sort_strs(listed_dir, indexed=indexed)]
+
+
+def filter_strs(strs: list,
+                keyword: "list or str" = None,
+                exclude: "list or str" = None,
+                match: callable = all):
+    if keyword is not None:
+        strs = keyword_strs(strs, keyword=keyword, exclude=False, match=match)
+
+    if exclude is not None:
+        strs = keyword_strs(strs, keyword=exclude, exclude=True, match=match)
+
+    return strs
+
+
+def keyword_strs(strs: list,
+                 keyword: "list or str",
+                 exclude: bool = False,
+                 match: callable = all):
+    if isinstance(keyword, str):
+        if exclude:
+            filt = lambda string: keyword not in string
+
+        else:
+            filt = lambda string: keyword in string
+
+    else:
+        if exclude:
+            filt = lambda string: match(kw not in string for kw in keyword)
+
+        else:
+            filt = lambda string: match(kw in string for kw in keyword)
+
+    return list(filter(filt, strs))
 
 
 def split_list(lst, n):
@@ -279,6 +377,19 @@ def gpu_stats():
     print(torch.cuda.memory_summary(device=None, abbreviated=False))
 
 
+def get_available_cuda_memory(device: int = 0):
+    """return VRAM available on a device in GB"""
+
+    assert torch.cuda.is_available(), "CUDA is not available"
+
+    return (torch.cuda.get_device_properties(device).total_memory
+            - torch.cuda.memory_allocated(device)) / 1024 ** 3
+
+
+def estimate_segment_batch_size(n_samples: int):
+    return int((700 *  29977 * get_available_cuda_memory()) / (7.79229736328125 * n_samples))
+
+
 def num_str(s, return_str=True, return_num=True):
     s = ''.join(filter(str.isdigit, s))
 
@@ -351,6 +462,112 @@ def get_metrics(path):
     return np.array(epoch),train_loss, val_loss
 
 
+def get_extrema(x, extend: float = 0):
+    return [x.min() - extend, x.max() + extend]
+
+def pmf1d(x: np.ndarray,
+          bins: int,
+          weights: np.ndarray = None,
+          norm: bool = True,
+          range: tuple = None):
+    count, edge = np.histogram(x, bins=bins, weights=weights, range=range)
+    p = count / count.sum() if norm else count
+    idx = np.digitize(x, edge[1:-1])
+    pi = p.flatten()[idx]
+    return p, pi, idx, edge[:-1] + np.diff(edge) / 2
+
+
+def pmfdd(arrays: "a list of arrays or N,d numpy array",
+          bins: int,
+          weights: np.ndarray = None,
+          norm: bool = True,
+          range: tuple = None,
+          statistic: str = None):
+    """each array in arrays should be the same length"""
+
+    if statistic is None:
+        statistic = "count" if weights is None else "sum"
+
+    if isinstance(arrays, list):
+        assert all(isinstance(x, np.ndarray) for x in arrays), \
+            "Must input a list of arrays"
+        arrays = [i.flatten() for i in arrays]
+        assert len({len(i) for i in arrays}) == 1, "arrays are not all the same length"
+        arrays = np.stack(arrays, axis=1)
+    else:
+        assert isinstance(arrays, np.ndarray), \
+            "Must input a list of arrays or a single N,d array"
+        arrays = arrays.squeeze()
+
+    count, edges, idx = scipy.stats.binned_statistic_dd(arrays,
+                                                        values=weights,
+                                                        statistic=statistic,
+                                                        bins=bins,
+                                                        expand_binnumbers=True,
+                                                        range=range)
+
+    # if range is not None:
+    #     idx = np.stack([np.digitize(value, edge[1:-1]) for edge, value in zip(edges, arrays.T)]) + 1
+
+    idx = np.ravel_multi_index(idx - 1, tuple([bins for i in arrays.T]))
+
+    p = count / count.sum() if norm else count
+    pi = p.flatten()[idx]
+    return p, pi, idx, (edge[:-1] + np.diff(edge) / 2 for edge in edges)
+
+
+def pmf(x: "list of arrays or array",
+        bins: int,
+        weights: np.ndarray = None,
+        norm: bool = True,
+        range: tuple = None):
+    """
+    returns : p, pi, idx, bin_centers
+
+    """
+    if isinstance(x, np.ndarray):
+        x = x.squeeze()
+        if x.ndim > 1:
+            return pmfdd(x, bins, weights, norm, range)
+        else:
+            return pmf1d(x, bins, weights, norm, range)
+    if isinstance(x, list):
+        if len(x) == 1:
+            return pmf1d(x[0], bins, weights, norm, range)
+        else:
+            return pmfdd(x, bins, weights, norm, range)
 
 
 
+def make_symbols():
+    unicharacters = ["\u03B1",
+                     "\u03B2",
+                     "\u03B3",
+                     "\u03B4",
+                     "\u03B5",
+                     "\u03B6",
+                     "\u03B7",
+                     "\u03B8",
+                     "\u03B9",
+                     "\u03BA",
+                     "\u03BB",
+                     "\u03BC",
+                     "\u03BD",
+                     "\u03BE",
+                     "\u03BF",
+                     "\u03C0",
+                     "\u03C1",
+                     "\u03C2",
+                     "\u03C3",
+                     "\u03C4",
+                     "\u03C5",
+                     "\u03C6",
+                     "\u03C7",
+                     "\u03C8",
+                     "\u03C9",
+                     "\u00C5"]
+    keys = "alpha,beta,gamma,delta,epsilon,zeta,eta,theta,iota,kappa,lambda,mu,nu,xi,omicron,pi,rho,final_sigma,sigma,tau,upsilon,phi,chi,psi,omega,angstrom"
+    return dict(zip(keys.split(","), unicharacters))
+
+
+symbols = make_symbols().__getitem__

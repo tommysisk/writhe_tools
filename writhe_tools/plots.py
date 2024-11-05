@@ -2,7 +2,76 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
 from itertools import chain
-from .stats import pmf
+from .utils import pmf
+
+
+def box_plot(values: np.ndarray,
+             errors: np.ndarray = None,
+             labels: np.ndarray = None,
+             ylabel: str = None,
+             xlabel: str = None,
+             ymin: float = None,
+             ymax: float = None,
+             cmap: str = "viridis",
+             color_list: list = None,
+             title: str = None,
+             ax=None,
+             font_scale: float = 5,
+             label_stride: int = 1,
+             capsize: float = 10,
+             width: float = .95,
+             linewidth: float = 1,
+             edgecolor: str = "black",
+             alpha: float = 1,
+             trunc: int = 25,
+             pre_trunc: int = 25,
+             rotation: float = 0):
+
+    values, errors = [i.squeeze() if i is not None else None for i in [values, errors]]
+
+    assert len(values.shape) == 1, \
+        "Need a set of values that can be squeezed to one dimension"
+
+    nstates = len(values)
+
+    labels = np.arange(1, nstates + 1).astype(str) if labels is None else labels
+
+    assert len(labels) == nstates, "Length of values and labels must be the same"
+
+    color_list = get_color_list(nstates, cmap, trunc, pre_trunc)\
+                 if color_list is None else color_list
+
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+
+    ax.bar(labels.astype(str),
+           values,
+           yerr=errors,
+           ecolor="grey",
+           color=color_list,
+           capsize=10,
+           width=width,
+           linewidth=linewidth, edgecolor=edgecolor,
+           align="center",
+           alpha=alpha,
+           error_kw=dict(capthick=capsize, lw=3),
+           )
+
+    ax.set_xticks(ticks=np.arange(0, nstates, label_stride), labels=labels[::label_stride])
+    #     ax.set_xticklabels(labels[::label_stride], rotation=rotation)
+
+    ax.set_xlabel(xlabel, size=6 * font_scale)
+    ax.set_ylabel(ylabel, size=6 * font_scale)
+    ax.set_title(title, size=6 * font_scale)
+
+    if all(i is not None for i in (ymin, ymax)):
+        ax.set_ylim(ymin, ymax)
+
+    ax.tick_params("both", labelsize=6 * font_scale)
+    ax.tick_params("x", labelrotation=rotation)
+    ax.set_xlim([-.5, nstates - .5])
+
+    return ax
 
 
 def get_color_list(n_colors: int, cmap: str, trunc=0, pre_trunc=0):

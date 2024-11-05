@@ -8,6 +8,21 @@ from scipy.linalg import svd
 import dask.array as da
 
 
+def rotate_points(x: "target", y: "rotate to target"):
+    u, s, vt = svd(x.T @ y, full_matrices=False)
+
+    sign = np.sign(np.linalg.det(vt.T @ u.T))
+
+    I = np.eye(x.shape[-1])
+
+    if x.shape[-1] >= 3:
+        I[-1, -1] = sign
+
+    R = u @ I @ vt
+
+    return y @ R.T
+
+
 def mean(x: np.ndarray, weights: np.ndarray = None, ax: int = 0):
     return x.mean(ax) if weights is None else (weights[:, None] * x).sum(ax) / weights.sum()
 
@@ -16,15 +31,23 @@ def center(x: np.ndarray, weights: np.ndarray = None):
     return x - mean(x, weights)
 
 
-def std(x: np.ndarray, weights: np.ndarray = None, ax: int = 0):
+def std(x: np.ndarray,
+        weights: np.ndarray = None,
+        bessel_correction: bool = False,
+        ax: int = 0):
     if weights is None:
         return x.std(ax)
     else:
-        M = np.sum(weights != 0)
-        N = ((M - 1) / M) * weights.sum()
+        if bessel_correction:
+
+            M = np.sum(weights)**2 / np.sum(weights**2) # effective sample size
+            N = ((M - 1) / M) * weights.sum()
+
+        else:
+            N = weights.sum()
+
         mu = mean(x, weights, ax=ax)
         return np.sqrt(np.sum(weights[:, None] * (x - mu)**2, ax) / N)
-
 
 
 def standardize(x: np.ndarray,
@@ -34,6 +57,7 @@ def standardize(x: np.ndarray,
     s = std(x, weights, ax) if scale else 1
     return np.divide((x - mu), s, out=np.zeros_like(x), where = s!= 0.)
 
+
 def cov(x: np.ndarray,
         y: np.ndarray = None,
         weights: np.ndarray = None,
@@ -41,36 +65,39 @@ def cov(x: np.ndarray,
         shift: bool = True,
         scale: bool = False,
         bessel_correction: bool = False):
+
     n = len(x)
 
-    if norm:
-        if weights is not None:
-            weights = weights.squeeze()
-            # in case weights are a matrix in which case the norm isn't always obvious
-            norm = weights.sum() if weights.ndim == 1 else 1
-        else:
-            norm = (n - 1) if bessel_correction else n
-    else:
-        norm = 1
-
-    if shift or scale:
-        x, y = (standardize(i, weights=weights, shift=shift, scale=scale) if i is not None else None
-                for i in (x, y))
-
     if weights is not None:
-        # weight for every frame
+        weights = weights.squeeze()
+        # in case weights are a matrix in which case the norm isn't always obvious
         if weights.ndim == 1:
-            # same as np.diag(weights) @ y
+            if norm:
+                if bessel_correction:
+                    M = np.sum(weights) ** 2 / np.sum(weights ** 2)  # effective sample size
+                    norm = ((M - 1) / M) * weights.sum()
+
+                else:
+                    norm = weights.sum()
+            else:
+                norm = 1
+
             apply_weights = lambda X: (weights[:, None] * X.reshape(n, -1)).reshape(n, -1)
 
-        # weight matrix (generally in the space of features (think iterative reweighting)
         else:
             assert (weights.shape[0] == weights.shape[1]) and (weights.shape[1] == y.shape[0]), \
                 ("weights should be a 1D matrix with len == y.shape[0]"
                  " or a square matrix with shape == (y.shape[0], y.shape[0])")
             apply_weights = lambda X: (weights @ X.reshape(n, -1)).reshape(n, -1)
+            norm = 1
+
     else:
+        norm = ((n - 1) if bessel_correction else n) if norm else 1
         apply_weights = lambda X: X
+
+    if shift or scale:
+        x, y = (standardize(i, weights=weights, shift=shift, scale=scale) if i is not None else None
+                for i in (x, y))
 
     return (x.T @ apply_weights(y) if y is not None else x.T @ apply_weights(x)) / norm
 
@@ -147,7 +174,6 @@ class CCA:
             dim: int = None,
             epsilon: float = None,
             dask: bool = False):
-
 
         if dim is None:
             dim = self.dim
@@ -373,3 +399,18 @@ def generalized_regression(x: np.ndarray, y: np.ndarray, weights: np.ndarray = N
     # return co-effs
     else:
         return b
+
+
+def rotate_points(x: "target", y: "rotate to target"):
+    u, s, vt = svd(x.T @ y, full_matrices=False)
+
+    sign = np.sign(np.linalg.det(vt.T @ u.T))
+
+    I = np.eye(x.shape[-1])
+
+    if x.shape[-1] >= 3:
+        I[-1, -1] = sign
+
+    R = u @ I @ vt
+
+    return y @ R.T

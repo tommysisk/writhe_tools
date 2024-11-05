@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-import IPython.utils.decorators
 import torch
 import torch.nn as nn
 from torch_scatter import scatter
@@ -11,8 +10,6 @@ from .utils import get_segments, flat_index
 def nnorm(x: torch.Tensor):
     """Convenience function for (batched) normalization of vectors stored in arrays with last dimension 3"""
     return x / torch.linalg.norm(x, dim=-1, keepdim=True)
-
-
 
 
 @torch.jit.script
@@ -41,7 +38,7 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor, ):
 
         = [(a · b) * (b · d) - (a · d) * ||b||**2 ] / sqrt( (1 - (a · b)**2) * (1 - (b · d)**2) )
 
-    Note that ||b||**2 == 1.
+    Note that ||·||**2 == 1.
 
     Set
     u = (a · b),
@@ -54,17 +51,18 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor, ):
     Precomputing dot products and recursive application of this formula to compute the
     interior angles of the spherical quadrilateral allows computation of the writhe
     with 6 dot products and a determinant per crossing.
-
     """
-    # ensure shape for segments, xyz for lazy arguments
+    # ensure shape for segments
     assert segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
-    segments = segments.unsqueeze(0) if segments.ndim < 2 else segments
-    xyz = xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
+    # catch any lazy arguments
+    segments, xyz = segments.unsqueeze(0) if segments.ndim < 2 else segments, \
+                      xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
     # displacement vectors between end points
-    dx = nnorm((-xyz[:, segments[:, :2], None] + xyz[:, segments[:, None, 2:]]).reshape(-1, len(segments), 4, 3))
-    # compute all dot products then work with scalars
+    dx = nnorm((-xyz[:, segments[:, :2], None] + xyz[:, segments[:, None, 2:]]
+                ).reshape(-1, len(segments), 4, 3))
+    # compute all dot products, then work with scalars
     dots = (dx[:, :, [0, 0, 0, 1, 1, 2]] * dx[:, :, [1, 2, 3, 2, 3, 3]]).sum(-1)
-    # indices
+    # get indices; dots is ordered according to indices of 3,3 upper right triangle
     u, v, h = [0, 4, 5, 1], \
               [4, 5, 1, 0], \
               [2, 3, 2, 3]
@@ -80,21 +78,16 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor, ):
     return torch.squeeze(theta * signs) / (2 * torch.pi)
 
 
-
-
-
-
 class WritheMessage(nn.Module):
     """
     Expedited Writhe message layer.
 
     """
-
     def __init__(self,
                  n_atoms: int,
                  n_features: int,
                  batch_size: int,
-                 bins: int = 100,
+                 bins: int = 250,
                  node_attr: str = "invariant_node_features",
                  distance_attr: str = "edge_dist",
                  segment_length: int = 1,
@@ -158,7 +151,7 @@ class WritheMessage(nn.Module):
         return self.n_atoms_.item()
 
     def embed_writhe(self, wr):
-        return (self.soft_one_hot(wr).unsqueeze(-1) * self.basis.clone()).sum(-2)
+        return (self.soft_one_hot(wr).unsqueeze(-1) * self.basis).sum(-2)
 
     def compute_writhe(self, x):
         return self.embed_writhe(writhe_segments(xyz=x.x.reshape(-1, self.n_atoms, 3),
@@ -168,30 +161,25 @@ class WritheMessage(nn.Module):
     def forward(self, x, update=True):
 
         src_node, dst_node = (i.flatten() for i in self.edges)
-
         writhe = self.compute_writhe(x)
 
         # derive attention weights from distances
         if self.distance_attr is not None:
             if hasattr(x, self.distance_attr):
-                logits = -1 * getattr(x, self.distance_attr)[self.distance_indices]
+                logits = getattr(x, self.distance_attr)[self.distance_indices].pow(2).neg()
 
         else:
             # if no distances computed, compute them
-            logits = -1 * (x.x[src_node] - x.x[dst_node]).norm(dim=-1)
+            logits = (x.x[src_node] - x.x[dst_node]).norm(dim=-1).pow(2).neg()
 
+        # get attention weights, softmax normalize, scatter
         weights = torch.exp(logits)
-
         attention = (weights / scatter(weights, dst_node)[dst_node]).unsqueeze(-1)
-
         message = scatter(writhe * attention, dst_node, dim=0)
 
         if update:
-
             x[self.node_attr] = x[self.node_attr] + message if self.residual else message
-
             return x
-
         else:
             return x[self.node_attr] + message if self.residual else message
 
@@ -387,139 +375,139 @@ def gaussian_binning(low: float,
 #             return features + message if self.residual else message
 
 
-class _SoftUnitStep(torch.autograd.Function):
-    # pylint: disable=arguments-differ
-
-    @staticmethod
-    def forward(ctx, x) -> torch.Tensor:
-        ctx.save_for_backward(x)
-        y = torch.zeros_like(x)
-        m = x > 0.0
-        y[m] = (-1 / x[m]).exp()
-        return y
-
-    @staticmethod
-    def backward(ctx, dy) -> torch.Tensor:
-        (x,) = ctx.saved_tensors
-        dx = torch.zeros_like(x)
-        m = x > 0.0
-        xm = x[m]
-        dx[m] = (-1 / xm).exp() / xm.pow(2)
-        return dx * dy
-
-
-def soft_unit_step(x):
-    r"""smooth :math:`C^\infty` version of the unit step function
-
-    .. math::
-
-        x \mapsto \theta(x) e^{-1/x}
-
-
-    Parameters
-    ----------
-    x : `torch.Tensor`
-        tensor of shape :math:`(...)`
-
-    Returns
-    -------
-    `torch.Tensor`
-        tensor of shape :math:`(...)`
-
-    """
-    return _SoftUnitStep.apply(x)
-
-
-def soft_one_hot_linspace(x: torch.Tensor, start, end, number, basis=None, cutoff=None) -> torch.Tensor:
-    r"""Projection on a basis of functions
-
-    Returns a set of :math:`\{y_i(x)\}_{i=1}^N`,
-
-    .. math::
-
-        y_i(x) = \frac{1}{Z} f_i(x)
-
-    where :math:`x` is the input and :math:`f_i` is the ith basis function.
-    :math:`Z` is a constant defined (if possible) such that,
-
-    .. math::
-
-        \langle \sum_{i=1}^N y_i(x)^2 \rangle_x \approx 1
-
-    See the last plot below.
-    Note that ``bessel`` basis cannot be normalized.
-
-    Parameters
-    ----------
-    x : `torch.Tensor`
-        tensor of shape :math:`(...)`
-
-    start : float
-        minimum value span by the basis
-
-    end : float
-        maximum value span by the basis
-
-    number : int
-        number of basis functions :math:`N`
-
-    basis : {'gaussian', 'cosine', 'smooth_finite', 'fourier', 'bessel'}
-        choice of basis family; note that due to the :math:`1/x` term, ``bessel`` basis does not satisfy the normalization of
-        other basis choices
-
-    cutoff : bool
-        if ``cutoff=True`` then for all :math:`x` outside of the interval defined by ``(start, end)``,
-        :math:`\forall i, \; f_i(x) \approx 0`
-
-    Returns
-    -------
-    `torch.Tensor`
-        tensor of shape :math:`(..., N)`
-
-    """
-    # pylint: disable=misplaced-comparison-constant
-
-    if cutoff not in [True, False]:
-        raise ValueError("cutoff must be specified")
-
-    if not cutoff:
-        values = torch.linspace(start, end, number, dtype=x.dtype, device=x.device)
-        step = values[1] - values[0]
-    else:
-        values = torch.linspace(start, end, number + 2, dtype=x.dtype, device=x.device)
-        step = values[1] - values[0]
-        values = values[1:-1]
-
-    diff = (x[..., None] - values) / step
-
-    if basis == "gaussian":
-        return diff.pow(2).neg().exp().div(1.12)
-
-    if basis == "cosine":
-        return torch.cos(math.pi / 2 * diff) * (diff < 1) * (-1 < diff)
-
-    if basis == "smooth_finite":
-        return 1.14136 * torch.exp(torch.tensor(2.0)) * soft_unit_step(diff + 1) * soft_unit_step(1 - diff)
-
-    if basis == "fourier":
-        x = (x[..., None] - start) / (end - start)
-        if not cutoff:
-            i = torch.arange(0, number, dtype=x.dtype, device=x.device)
-            return torch.cos(math.pi * i * x) / math.sqrt(0.25 + number / 2)
-        else:
-            i = torch.arange(1, number + 1, dtype=x.dtype, device=x.device)
-            return torch.sin(math.pi * i * x) / math.sqrt(0.25 + number / 2) * (0 < x) * (x < 1)
-
-    if basis == "bessel":
-        x = x[..., None] - start
-        c = end - start
-        bessel_roots = torch.arange(1, number + 1, dtype=x.dtype, device=x.device) * math.pi
-        out = math.sqrt(2 / c) * torch.sin(bessel_roots * x / c) / x
-
-        if not cutoff:
-            return out
-        else:
-            return out * ((x / c) < 1) * (0 < x)
-
-    raise ValueError(f'basis="{basis}" is not a valid entry')
-
+# class _SoftUnitStep(torch.autograd.Function):
+#     # pylint: disable=arguments-differ
+#
+#     @staticmethod
+#     def forward(ctx, x) -> torch.Tensor:
+#         ctx.save_for_backward(x)
+#         y = torch.zeros_like(x)
+#         m = x > 0.0
+#         y[m] = (-1 / x[m]).exp()
+#         return y
+#
+#     @staticmethod
+#     def backward(ctx, dy) -> torch.Tensor:
+#         (x,) = ctx.saved_tensors
+#         dx = torch.zeros_like(x)
+#         m = x > 0.0
+#         xm = x[m]
+#         dx[m] = (-1 / xm).exp() / xm.pow(2)
+#         return dx * dy
+#
+#
+# def soft_unit_step(x):
+#     r"""smooth :math:`C^\infty` version of the unit step function
+#
+#     .. math::
+#
+#         x \mapsto \theta(x) e^{-1/x}
+#
+#
+#     Parameters
+#     ----------
+#     x : `torch.Tensor`
+#         tensor of shape :math:`(...)`
+#
+#     Returns
+#     -------
+#     `torch.Tensor`
+#         tensor of shape :math:`(...)`
+#
+#     """
+#     return _SoftUnitStep.apply(x)
+#
+#
+# def soft_one_hot_linspace(x: torch.Tensor, start, end, number, basis=None, cutoff=None) -> torch.Tensor:
+#     r"""Projection on a basis of functions
+#
+#     Returns a set of :math:`\{y_i(x)\}_{i=1}^N`,
+#
+#     .. math::
+#
+#         y_i(x) = \frac{1}{Z} f_i(x)
+#
+#     where :math:`x` is the input and :math:`f_i` is the ith basis function.
+#     :math:`Z` is a constant defined (if possible) such that,
+#
+#     .. math::
+#
+#         \langle \sum_{i=1}^N y_i(x)^2 \rangle_x \approx 1
+#
+#     See the last plot below.
+#     Note that ``bessel`` basis cannot be normalized.
+#
+#     Parameters
+#     ----------
+#     x : `torch.Tensor`
+#         tensor of shape :math:`(...)`
+#
+#     start : float
+#         minimum value span by the basis
+#
+#     end : float
+#         maximum value span by the basis
+#
+#     number : int
+#         number of basis functions :math:`N`
+#
+#     basis : {'gaussian', 'cosine', 'smooth_finite', 'fourier', 'bessel'}
+#         choice of basis family; note that due to the :math:`1/x` term, ``bessel`` basis does not satisfy the normalization of
+#         other basis choices
+#
+#     cutoff : bool
+#         if ``cutoff=True`` then for all :math:`x` outside of the interval defined by ``(start, end)``,
+#         :math:`\forall i, \; f_i(x) \approx 0`
+#
+#     Returns
+#     -------
+#     `torch.Tensor`
+#         tensor of shape :math:`(..., N)`
+#
+#     """
+#     # pylint: disable=misplaced-comparison-constant
+#
+#     if cutoff not in [True, False]:
+#         raise ValueError("cutoff must be specified")
+#
+#     if not cutoff:
+#         values = torch.linspace(start, end, number, dtype=x.dtype, device=x.device)
+#         step = values[1] - values[0]
+#     else:
+#         values = torch.linspace(start, end, number + 2, dtype=x.dtype, device=x.device)
+#         step = values[1] - values[0]
+#         values = values[1:-1]
+#
+#     diff = (x[..., None] - values) / step
+#
+#     if basis == "gaussian":
+#         return diff.pow(2).neg().exp().div(1.12)
+#
+#     if basis == "cosine":
+#         return torch.cos(math.pi / 2 * diff) * (diff < 1) * (-1 < diff)
+#
+#     if basis == "smooth_finite":
+#         return 1.14136 * torch.exp(torch.tensor(2.0)) * soft_unit_step(diff + 1) * soft_unit_step(1 - diff)
+#
+#     if basis == "fourier":
+#         x = (x[..., None] - start) / (end - start)
+#         if not cutoff:
+#             i = torch.arange(0, number, dtype=x.dtype, device=x.device)
+#             return torch.cos(math.pi * i * x) / math.sqrt(0.25 + number / 2)
+#         else:
+#             i = torch.arange(1, number + 1, dtype=x.dtype, device=x.device)
+#             return torch.sin(math.pi * i * x) / math.sqrt(0.25 + number / 2) * (0 < x) * (x < 1)
+#
+#     if basis == "bessel":
+#         x = x[..., None] - start
+#         c = end - start
+#         bessel_roots = torch.arange(1, number + 1, dtype=x.dtype, device=x.device) * math.pi
+#         out = math.sqrt(2 / c) * torch.sin(bessel_roots * x / c) / x
+#
+#         if not cutoff:
+#             return out
+#         else:
+#             return out * ((x / c) < 1) * (0 < x)
+#
+#     raise ValueError(f'basis="{basis}" is not a valid entry')
+#

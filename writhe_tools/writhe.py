@@ -1,5 +1,5 @@
 ﻿#!/usr/bin/env python
-
+__author__ = "Thomas.R.Sisk@DartmouthCollege"
 import os
 import ray
 import multiprocessing
@@ -11,15 +11,16 @@ import warnings
 import matplotlib.text
 import logging
 import torch
-
+import math
+from .utils import split_list, estimate_segment_batch_size, get_segments
+from .writhe_nn import writhe_segments
+from joblib import Parallel, delayed
 from .utils import (save_dict,
                     load_dict,
                     to_numpy,
                     Timer,
                     window_average,
                     )
-
-from .writhe_utils import calc_writhe_parallel_cuda, get_segments
 
 
 class MplFilter(logging.Filter):
@@ -32,100 +33,52 @@ class MplFilter(logging.Filter):
 
 matplotlib.text._log.addFilter(MplFilter())
 
-__author__ = "Thomas.R.Sisk@DartmouthCollege"
+
+# Here, we consider the approach at is fastest with ray multiprocessing on CPUs!
+# The more straight forward way of computing the writhe is implemented in writhe_nn,
+# this computation is written specifically for ray and should not be used otherwise
 
 
-##########################################   fastest ways of implementing these linear algebra ops for this purpose  (NOT trivial) ############################################
 def nnorm(x):
     return x / np.linalg.norm(x, axis=-1, keepdims=True)
 
 
-def ncross(x, y):
-    "for arrays of shape Nframes,Natoms,3(XYZ)"
-    # c = np.array(list(map(cross,x,y)))
-    return np.cross(x, y, axis=-1)
-
-
-def ndot(x, y):
-    # d = np.array(list(map(dot,x,y)))[:,None]
-    return np.sum(x * y, axis=-1)
-
-
-def ndet(v1, v2, v3):
-    """for the triple product and finding the signed sin of the angle between v2 and v3, v1 should
-    be set equal to a vector mutually orthogonal to v2,v3"""
-    #     det = np.array(list(map(lambda x,y,z:np.linalg.det(np.array([x,y,z])),
-    #                         v1,v2,v3)))[:,None]
-    return ndot(v1, ncross(v2, v3))
-
-
-def uproj(a, b, norm_b: bool = True, norm_proj: bool = True):
-    b = nnorm(b) if norm_b else b
-    # faster than np.matmul when using ray
-    proj = a - b * (a * b).sum(dim=-1).unsqueeze(-1)
-    return nnorm(proj) if norm_proj else proj
-
-## how to compute writhe angle (omega) using ortho projection rather than cross products. Still appears to be slower than cross products.
-# smat = xyz[:, segments]
-# n_segments = smat.shape[1]
-# sum_dim = 2
-# indices = torch.LongTensor([[0, 1, 0, 2],
-#                             [3, 2, 3, 1],
-#                             [1, 3, 2, 0]
-#                            ]).T
-#
-# dx = nnorm((-smat[:, :, :2, None, :] + smat[:, :, None, 2:, :]).reshape(-1, n_segments, 4, 3)) #displacements
-# omega = (-torch.arcsin(uproj(dx[:, :, indices[:,:-1]], dx[:, :, indices[:, -1], None]).prod(dim=-2).sum(-1).clip(-1, 1))).sum(-1)
-
-
-##############################################################################################################################
-
-
-def writhe_segment(segment=None, xyz=None, smat=None):
+def writhe_segment(segment=None, xyz=None):
     """
+
     compute the writhe (signed crossing) of 2 segments for all frames (index 0) in xyz (xyz can contain just one frame)
-    
-    THERE ARE 2 INPUT OPTIONS
-    
     **provide both of the following**
-    
     segment: numpy array of shape (4,) giving the indices of the 4 alpha carbons in xyz creating 2 segments:::
              array([seg1_start_point,seg1_end_point,seg2_start_point,seg2_end_point])
-
     xyz: numpy array of shape (Nframes, N_alpha_carbons, 3),coordinate array giving the positions of ALL the alpha carbons
 
-    **OR just the following**
-    
-    smat ::: numpy array of shape (Nframes, 4, 3) : sliced coordinate matrix: coordinate array that is pre-sliced
-    with only the positions of the 4 alpha carbons constituting the 2 segments to compute the writhe between"""
-
-    if smat is None:
-        assert not ((segment is None) or (xyz is None)), \
-            "must input smat or both a segment and xyz coordinates"
-        smat = (np.expand_dims(xyz, 0) if xyz.ndim < 3 else xyz)[:, segment]
-    else:
-        smat = np.expand_dims(smat, 0) if smat.ndim < 3 else smat
-
-    # smat = nnorm(smat)
-    sum_dim = None if smat.shape[0] == 1 else 1
-
+    """
+    xyz = xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
     # broadcasting trick
     # negative sign, None placement and order are intentional, don't change without testing equivalent option
-    displacements = nnorm((-smat[:, :2, None, :] + smat[:, None, 2:, :]).reshape(-1, 4, 3))
+    dx = nnorm((-xyz[:, segment[:2], None] + xyz[:, segment[None, 2:]]).reshape(-1, 4, 3))
 
-    # array broadcasting is (surprisingly) slower than list comprehensions
-    # when using ray for the following operations (without ray, broadcasting should be faster).
-    crosses = np.stack([nnorm(ncross(displacements[:, i], displacements[:, j]))
-                        for i, j in zip([0, 1, 3, 2], [1, 3, 2, 0])], axis=1)
+    # for the following, array broadcasting is (surprisingly) slower than list comprehensions
+    # when using ray!! (without ray, broadcasting is faster).
+    dots = np.stack([(dx[:, i] * dx[:, j]).sum(-1)
+                     for i, j in zip([0, 0, 0, 1, 1, 2],
+                                     [1, 2, 3, 2, 3, 3])], axis=-1)
+    # indices
+    u, v, h = [0, 4, 5, 1], \
+              [4, 5, 1, 0], \
+              [2, 3, 2, 3]
 
-    omega = np.stack([np.arcsin(ndot(crosses[:, i], crosses[:, j]).clip(-1, 1))
-                      for i, j in zip([0, 1, 2, 3], [1, 2, 3, 0])], axis=1).squeeze().sum(sum_dim)
+    # surface area from scalars
 
-    signs = np.sign(ndot(ncross(smat[:, 3] - smat[:, 2],
-                                smat[:, 1] - smat[:, 0]),
-                         displacements[:, 0])).squeeze()
+    theta = np.sum([np.arcsin(((dots[:, i] * dots[:, j] - dots[:, k])
+             / np.sqrt(abs(((1 - dots[:, i] ** 2) * (1 - dots[:, j] ** 2))).clip(1e-10))
+             ).clip(-1, 1)) for i, j, k in zip(u, h, v)], axis=0)
 
-    wr = (1 / (2 * np.pi)) * (omega * signs)
+    signs = np.sign(np.sum(dx[:, 0] * np.cross(xyz[:, segment[3]] - xyz[:, segment[2]],
+                                               xyz[:, segment[1]] - xyz[:, segment[0]], axis=-1),
+                              axis=-1)).squeeze()
+
+    wr = (theta * signs) / (2 * np.pi)
 
     return wr
 
@@ -134,13 +87,9 @@ def writhe_segment(segment=None, xyz=None, smat=None):
 def writhe_segments_along_axis(segments: np.ndarray, xyz: np.ndarray, axis: int = 1):
     """helper function for parallelization to compute writhe over chuncks of segments for all frames in xyz"""
     # noinspection PyTypeChecker
-    return np.apply_along_axis(func1d=functools.partial(writhe_segment, xyz=xyz, smat=None),
+    return np.apply_along_axis(func1d=functools.partial(writhe_segment, xyz=xyz),
                                axis=axis, arr=segments)
 
-
-###parallel computation of writhe for multiple segments -- NOT trivial, is very slow otherwise -- splits segments, NOT frames, ALWAYS USE this function regardless of frame striding or selection 
-
-##DON'T use this function if computing for one segment (parallelization is done over segments, NOT frames)
 
 # Ray parallelization is substantially faster than python multiprocessing
 def calc_writhe_parallel(segments: np.ndarray,
@@ -160,6 +109,40 @@ def calc_writhe_parallel(segments: np.ndarray,
     return result
 
 
+def writhe_batches_cuda(xyz: torch.Tensor,
+                        segments: torch.LongTensor,
+                        device: int = 0):
+    xyz = xyz.to(device)
+    result = torch.cat([writhe_segments(xyz, i).cpu() for i in segments], axis=-1).numpy() \
+            if isinstance(segments, (list, tuple)) else writhe_segments(xyz=xyz, segments=segments).cpu().numpy()
+    del xyz
+    torch.cuda.empty_cache()
+    return result
+
+
+# noinspection PyArgumentList
+def calc_writhe_parallel_cuda(xyz: torch.Tensor,
+                              segments: torch.LongTensor,
+                              batch_size: int = None) -> np.ndarray:
+
+    batch_size = estimate_segment_batch_size(len(xyz)) if batch_size is None else batch_size
+
+    if batch_size > len(segments):
+        return writhe_batches_cuda(xyz, segments, 0)
+
+    split = math.ceil(len(segments) / batch_size)
+    chunks = torch.tensor_split(segments, split)
+
+    if len(segments) < 5 * batch_size or torch.cuda.device_count() == 1:
+        return writhe_batches_cuda(xyz, chunks, device=0)
+
+    else:
+        minibatches = split_list(chunks, torch.cuda.device_count())
+        return np.concatenate(Parallel(n_jobs=-1)(
+                delayed(writhe_batches_cuda)(xyz, j, i) for i, j in enumerate(minibatches)),
+                    axis=-1)
+
+
 def to_writhe_matrix(writhe_features, n_points, length):
     n = len(writhe_features)
     writhe_matrix = np.zeros([n] + [n_points - length] * 2)
@@ -171,21 +154,6 @@ def to_writhe_matrix(writhe_features, n_points, length):
     writhe_matrix += writhe_matrix.transpose(0, 2, 1)
 
     return writhe_matrix.squeeze()
-
-
-# def to_writhe_adj_matrix(writhe_features, n_points, length, segments=None):
-#     n = len(writhe_features)
-#
-#     if segments is None:
-#         segments = get_segments(n_points, length)
-#
-#     adj_matrix = np.zeros((n, n_points, n_points))
-#
-#     adj_matrix[:, segments[:, 0], segments[:, 2]] = writhe_features
-#     adj_matrix[:, segments[:, 1], segments[:, 3]] = writhe_features
-#     adj_matrix += adj_matrix.transpose(0, 2, 1)
-#
-#     return adj_matrix.squeeze()
 
 
 def normalize_writhe(wr: np.ndarray, ax: int = None):
@@ -243,6 +211,21 @@ class Writhe:
             else:
                 self.n_points, self.n = None, None
 
+    def compute_writhe_(self,
+                        xyz: np.ndarray,
+                        segments: np.ndarray,
+                        cpus_per_job: int,
+                        cuda: bool,
+                        cuda_batch_size: int):
+
+        if cuda and torch.cuda.is_available():
+            return calc_writhe_parallel_cuda(segments=torch.from_numpy(segments).long(),
+                                             xyz=torch.from_numpy(xyz),
+                                             batch_size=cuda_batch_size)
+        else:
+            if cuda: print("You tried to use CUDA but it's not available according to torch, defaulting to CPUs.")
+            return calc_writhe_parallel(segments=segments, xyz=xyz, cpus_per_job=cpus_per_job)
+
     def compute_writhe(self,
                        length: "Define segment size : CA[i] to CA[i+length], type : int",
                        matrix: "Make symmetric writhe matrix" = False,
@@ -251,8 +234,8 @@ class Writhe:
                        n_points: "Number of points in each topology used to estimate segments, type : int " = None,
                        speed_test: "only test the speed of the calculation and return nothing" = False,
                        cpus_per_job: int = 1,
-                       cuda: bool = False
-                       # adj_matrix: "Make symmetric adjacency/connectivity matrix" = False,
+                       cuda: bool = False,
+                       cuda_batch_size: "number of segments to compute per batch if using cuda" = None
                        ):
         """
         All arguments apart from length are not required (can be left as default)
@@ -285,17 +268,13 @@ class Writhe:
             else:
                 n_points = xyz.shape[1]
 
+        # compute (indices) of all segments of a given length
+        segments = get_segments(n=n_points,
+                                length=length)
+
         if speed_test:
-            segments = get_segments(n=n_points, length=length)
-
             with Timer():
-                if cuda and torch.cuda.is_available():
-                    _ = calc_writhe_parallel_cuda(segments=torch.from_numpy(segments),
-                                                  xyz=torch.from_numpy(xyz))
-
-                else:
-                    if cuda: print("You tried to use CUDA but it's not available according to torch, defaulting to CPUs.")
-                    _ = calc_writhe_parallel(segments=segments, xyz=xyz, cpus_per_job=cpus_per_job)
+                _ = self.compute_writhe_(xyz, segments, cpus_per_job, cuda, cuda_batch_size)
             return None
 
         results = dict(length=length,
@@ -303,16 +282,7 @@ class Writhe:
                        n=len(xyz),
                        )
 
-        # compute (indices) of all segments of a given length
-        segments = get_segments(n=n_points,
-                                length=length)
-
-        if cuda and torch.cuda.is_available():
-            results["writhe_features"] = calc_writhe_parallel_cuda(segments=torch.from_numpy(segments),
-                                                                   xyz=torch.from_numpy(xyz))
-        else:
-            if cuda: print("You tried to use CUDA but it's not available according to torch, defaulting to CPUs.")
-            results["writhe_features"] = calc_writhe_parallel(segments=segments, xyz=xyz)
+        results["writhe_features"] = self.compute_writhe_(xyz, segments, cpus_per_job, cuda, cuda_batch_size)
 
         results["segments"] = segments
 
@@ -325,12 +295,6 @@ class Writhe:
             results["writhe_matrix"] = to_writhe_matrix(writhe_features=results["writhe_features"],
                                                         n_points=n_points,
                                                         length=length)
-
-        # if adj_matrix:
-        #     results["writhe_adj_matrix"] = to_writhe_adj_matrix(segments=results["segments"],
-        #                                                         n_points=n_points,
-        #                                                         writhe_features=results["writhe_features"],
-        #                                                         length=length)
 
         return results
 
@@ -381,24 +345,6 @@ class Writhe:
         writhe_features = writhe_features if writhe_features is not None else self.writhe_features
         length = length if length is not None else self.length
         return to_writhe_matrix(writhe_features, n_points, length)
-    #
-    # def adj_matrix(self,
-    #                segments: "the segments used in the writhe calculation, type : np.ndarray" = None,
-    #                n_points: "number of points in each topology to estimate segments, type : int" = None,
-    #                writhe_features=None,
-    #                length=None):
-    #
-    #     """convienience function for reindexing and sorting non-redundant
-    #      writhe calculation into symmetric matrix (redundant) for visualization"""
-    #
-    #     self.check_data()
-    #
-    #     n_points = n_points if n_points is not None else self.n_points
-    #     writhe_features = writhe_features if writhe_features is not None else self.writhe_features
-    #     length = length if length is not None else self.length
-    #     segments = segments if segments is not None else self.segments
-    #
-    #     return to_writhe_adj_matrix(writhe_features, n_points, length, segments)
 
     def plot_writhe_matrix(self, ave=True, index: "int or list or str" = None,
                            absolute=False, xlabel: str = None, ylabel: str = None,
