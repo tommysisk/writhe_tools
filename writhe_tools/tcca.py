@@ -201,6 +201,8 @@ class CCA:
 
         cca = pseudo_half_inv["x0"].T @ cov(x0, x1) @ pseudo_half_inv["x1"]
 
+        self.matrix = cca
+
         if dask:
             v0, svals, v1_t = dask_svd(cca, compressed=True, k=self.dim)
         else:
