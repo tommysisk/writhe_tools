@@ -95,18 +95,11 @@ def keyword_strs(strs: list,
                  exclude: bool = False,
                  match: callable = all):
     if isinstance(keyword, str):
-        if exclude:
-            filt = lambda string: keyword not in string
-
-        else:
-            filt = lambda string: keyword in string
-
+        filt = (lambda string: keyword not in string) if exclude else\
+               lambda string: keyword in string
     else:
-        if exclude:
-            filt = lambda string: match(kw not in string for kw in keyword)
-
-        else:
-            filt = lambda string: match(kw in string for kw in keyword)
+        filt = (lambda string: match(kw not in string for kw in keyword)) if exclude else\
+               (lambda string: match(kw in string for kw in keyword))
 
     return list(filter(filt, strs))
 
