@@ -207,6 +207,36 @@ def generalized_regression(x: np.ndarray, y: np.ndarray, weights: np.ndarray = N
         return b
 
 
+def pca(x: np.ndarray,
+        weights: np.ndarray = None,
+        shift: bool = True,
+        scale: bool = False,
+        scale_projection: bool = False,
+        n_comp: int = 10,
+        dask: bool = False):
+    """compute the business half of econ svd"""
+    x = standardize(x, shift=shift, scale=scale, weights=weights) / (np.sqrt(x.shape[0]) if not scale else 1)
+    s, vt = svd(x, full_matrices=False)[1:] if not dask else\
+            dask_svd(x, k=n_comp, compressed=True)[1:]
+
+    v = vt.T[:, :n_comp]
+
+    projection = x @ v
+    projection = projection / s[:n_comp] if scale_projection else projection
+    return projection, s, vt.T
+
+
+def corr(x: np.ndarray, y: np.ndarray):
+    """
+    x and y should be data arrays with shape n_samples by d variables
+
+    """
+    data = np.stack([x, y], -1)
+    data = data - data.mean(0, keepdims=True)
+    return np.sum(np.prod(data, axis=-1), 0) / np.prod(np.linalg.norm(data, axis=0), axis=-1)
+
+
+
 def rotate_points(x: "target", y: "rotate to target"):
 
     u, s, vt = svd(x.T @ y, full_matrices=False)
