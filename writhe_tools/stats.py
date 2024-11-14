@@ -1,19 +1,20 @@
+from typing import List, Union, Any
+from collections import Counter
+from functools import partial
+import warnings
+import multiprocessing
+import functools
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import interpolate
 from scipy.optimize import minimize
+from scipy.stats import gaussian_kde
+from scipy.linalg import svd
 import ray
 from sklearn.cluster import KMeans
 from pyblock.blocking import reblock, find_optimal_block
-from collections import Counter
-from .plots import subplots_fes2d, subplots_proj2d
-from functools import partial
-import warnings
-from scipy.stats import gaussian_kde
-from scipy.linalg import svd
-import multiprocessing
-import functools
 import dask.array as da
+from .plots import subplots_fes2d, subplots_proj2d
 from .utils import (group_by,
                     sort_indices_list,
                     reindex_list,
@@ -21,8 +22,6 @@ from .utils import (group_by,
                     combinations,
                     pmf,
                     get_extrema)
-
-
 
 
 def mean(x: np.ndarray, weights: np.ndarray = None, ax: int = 0):
@@ -193,31 +192,25 @@ def generalized_regression(x: np.ndarray, y: np.ndarray, weights: np.ndarray = N
         weights = matrix_power(weights, 1 / 2)
     # prep covariance estimator
     cov_ = functools.partial(cov, shift=False, norm=False, weights=weights)
-
     # add column of ones (intercept D.O.F)
     x = add_intercept(np.copy(x)) if intercept else x
-
     # get co-effs (solve the linear algebra problem with psuedo inv)
     b = matrix_power(cov_(x), -1, sym=True) @ cov_(x, y)
-
     # return fit
     if transform:
         return x @ b
-
     # return function to transform data
     elif fit:
         return lambda x: x * b[0] + b[1]
-
     # return co-effs
     else:
         return b
 
 
 def rotate_points(x: "target", y: "rotate to target"):
+
     u, s, vt = svd(x.T @ y, full_matrices=False)
-
     sign = np.sign(np.linalg.det(vt.T @ u.T))
-
     I = np.eye(x.shape[-1])
 
     if x.shape[-1] >= 3:
@@ -256,7 +249,7 @@ def Kmeans(p: np.ndarray,
     kdist = kmeans.transform(p).min(1)
     # get cluster centers
     centers = kmeans.cluster_centers_
-    # collect clusters into list of indices arrays
+    # collect clusters into list of indices arrays SORTED BY DISTANCE FROM CENTROID
     frames_cl = sort_indices_list(indices_list=group_by(dtraj),
                                   obs=kdist,
                                   max=False)
@@ -555,7 +548,8 @@ class MaxEntropyReweight():
                    sigma_reg_u: float = 20,
                    steps: int = 200,
                    scale: np.array = 1,
-                   store_sigma: bool = False):
+                   store_sigma: bool = False,
+                   return_scan: bool = False):
 
         if data_indices is not None:
 
@@ -573,20 +567,28 @@ class MaxEntropyReweight():
                                            store_result=False)["kish"]
         reached_target = False
         sigma_optimal = sigma_reg_u * scale
+        if return_scan:
+            scan = []
         for sigma in np.linspace(sigma_reg_l, sigma_reg_u, steps)[::-1]:
 
-            sigma = scale * sigma
+            sigma_ = scale * sigma
+            score = kish(sigma_)
+            if return_scan:
+                scan.append([sigma, score])
 
-            if kish(sigma) < self.target_kish:
+            if score < self.target_kish:
                 reached_target = True
                 break
 
-            sigma_optimal = sigma
+            sigma_optimal = sigma_
 
         if not reached_target: print("Did not find optimal kish")
         if store_sigma: self.sigma_reg[data_indices] = sigma_optimal
 
-        return sigma_optimal
+        if return_scan:
+            return np.array(scan)
+        else:
+            return sigma_optimal
 
     def kish_scan(self,
                   data_indices: list = None,
@@ -629,11 +631,11 @@ class MaxEntropyReweight():
 
         # regularization for each data type
 
-        single_regs = np.concatenate([self.kish_scan(i,
+        single_regs = np.concatenate([np.atleast_1d(self.kish_scan(i,
                                                      sigma_reg_l=single_sigma_reg_l,
                                                      sigma_reg_u=single_sigma_reg_u,
                                                      steps=single_steps,
-                                                     multi_proc=multi_proc) * np.ones(len(i))
+                                                     multi_proc=multi_proc)).repeat(len(i))
                                       for i in indices_list])
 
         # global regularization - find single scalar for regularization parameters of each data type
@@ -777,7 +779,8 @@ class DensityComparator():
         if hasattr(self, "bins_"):
             if self.bins_ != x:
                 warnings.warn(
-                    f"Bins to use in densitiy estimators has already been set to {self.bins_}. Changing to {x}. Consider recomputing all densities")
+                    f"Bins to use in densitiy estimators has already been set to {self.bins_}."
+                    f" Changing to {x}. Consider recomputing all densities")
         self.bins_ = x
 
         return
@@ -791,8 +794,8 @@ class DensityComparator():
 
         if "hists" in attr:
             warnings.warn((
-                "Using densities defined by histograms in the computation of a comparision metric can cause counter intuitive results "
-                "because empty bins are masked out to prevent nans")
+                "Using densities defined by histograms in the computation of a comparison metric"
+                " can cause counter intuitive results because empty bins are masked out to prevent nans")
             )
 
         if all(i is None for i in (weight0, weight1)):
