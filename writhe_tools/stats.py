@@ -307,9 +307,7 @@ def mi(x,
             """
 
         pxy = adjust_min(pxy)
-
         px, py = pxy.sum(1), pxy.sum(0)
-
         info = pxy * np.log2(np.diag(1 / px) @ pxy @ np.diag(1 / py))
 
     else:
@@ -319,11 +317,8 @@ def mi(x,
            similarity function"""
 
         i, j = np.where(pxy != 0)
-
         px, py = pxy.sum(1), pxy.sum(0)
-
         pij = pxy[i, j]
-
         info = pij * np.log2(pij / (px[i] * py[j]))
 
     norm = 2 * len(pxy) if norm == "state" \
@@ -377,22 +372,14 @@ def process_ids(ids):
 
 
 def conditional_ray(attr):
-    """conditional ray decorator
     """
-
+    conditional ray decorator
+    """
     def decorator(func):
-
         def inner(*args, **kwargs):
-
             is_ray = getattr(args[0], attr)
-
-            if is_ray:
-                return ray.remote(func)
-            else:
-                return func
-
+            return ray.remote(func) if is_ray else func
         return inner
-
     return decorator
 
 
@@ -670,6 +657,7 @@ class DensityComparator():
         self.bounds = None
         self.data_list = data
         self.weights_list = weights
+        self.kde_grid = None
 
     @property
     def data_list(self, array: bool = False):
@@ -680,7 +668,6 @@ class DensityComparator():
     def data_list(self, x):
 
         assert isinstance(x, list), "data_list must be type list"
-
         assert all((isinstance(i, np.ndarray) for i in x)), "all data should be type np.ndarray"
 
         x = [i.squeeze() if i.squeeze().ndim > 1 else i.reshape(-1, 1) for i in x]
@@ -688,11 +675,8 @@ class DensityComparator():
         assert len(set([i.shape[-1] for i in x])) == 1, "All data arrays must be the same dimension"
 
         self.dim = x[0].shape[-1]
-
         self.n_datasets = len(x)
-
         self.data_list_ = x
-
         self.set_bounds()
 
         return
@@ -705,25 +689,18 @@ class DensityComparator():
     def weights_list(self, x):
 
         if x is not None:
-
             x = [i.squeeze() for i in x]
-
             for i, (d, w) in enumerate(zip(self.data_list, x)):
                 assert len(d) == len(w), f"The number of data samples must match the number of weights : index {i}"
-
             self.weights_list_ = x
-
         else:
             self.weights_list_ = None
 
         return
 
     def set_bounds(self):
-
         assert self.data_list is not None, "Must have data_list_ attribute in order to estimate bounds"
-
         self.bounds = np.array([get_extrema(i) for i in np.concatenate(self.data_list).T])
-
         return
 
     def estimate_kde(self,
@@ -821,11 +798,8 @@ class DensityComparator():
         if all(i is None for i in (weight0, weight1)):
 
             attr = attr + "_weighted" if weight else attr
-
             assert hasattr(self, attr), f"Class must have {attr} in order to compare"
-
             density = getattr(self, attr)
-
             d0, d1 = np.stack([density[i] for i in pairs[:, 0]]), np.stack([density[i] for i in pairs[:, 1]])
 
         else:
@@ -834,12 +808,10 @@ class DensityComparator():
                 "Must specify weighting for both datasets if weighting is specified for either"
 
             densities = []
-
             for i in (weight0, weight1):
+
                 attr_ = attr + "_weighted" if i else attr
-
                 assert hasattr(self, attr_), f"Class must have {attr_} in order to compare"
-
                 densities.append(getattr(self, attr_))
 
             d0, d1 = [np.stack([d[i] for i in p]) for p, d in zip(pairs.T, densities)]
@@ -858,7 +830,6 @@ class DensityComparator():
                  kwargs: dict = {}):
 
         attr = 'kdes_weighted' if weight else 'kdes'
-
         assert hasattr(self, attr), "Must estimate KDEs before plotting"
 
         if dscrs is not None:
@@ -874,7 +845,6 @@ class DensityComparator():
         density = getattr(self, "kdes_weighted" if weight else "kdes")
 
         if self.dim == 2:
-
             args = dict(figsize=figsize, sharex=True, sharey=True, cbar_label="Density")
             args.update(kwargs)
 
@@ -896,12 +866,9 @@ class DensityComparator():
 
             fig.supylabel("Density")
             fig.supxlabel(xlabel)
-
             fig.suptitle(title)
 
-            # fig.tight_layout()
-
-            pass
+            return
 
         else:
             raise Exception("Currently, data must be 1 or 2 dimensional to plot")
@@ -941,6 +908,7 @@ class DensityComparator():
                        rows=1,
                        extent=self.bounds,
                        **args)
+        #TODO make an option to plot 1D histogram data
         return
 
 
