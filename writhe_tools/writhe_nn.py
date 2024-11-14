@@ -109,11 +109,15 @@ class WritheMessage(nn.Module):
         if distance_attr is not None:
             # if a batch already contains all the pairwise Euclidian distances,
             # fetch them on the fly using flattened indices
-
-            dist_index = flat_index(*edges, n=n_atoms, d0=1)
-            increment = int(n_atoms ** 2 - n_atoms)
             self.register_buffer("distance_indices",
-                                 torch.cat([i * increment + dist_index for i in range(batch_size)]))
+                                (flat_index(*edges, n=n_atoms, d0=1).repeat(batch_size, 1)
+                                + int(n_atoms ** 2 - n_atoms) * torch.arange(batch_size).unsqueeze(-1)
+                                ).flatten()
+                                 )
+            # self.register_buffer("distance_indices",
+            #                      distance_indices)
+            # self.register_buffer("distance_indices",
+            #                      torch.cat([i * increment + dist_index for i in range(batch_size)]))
 
         self.register_buffer("edges",
                              torch.cat([i * n_atoms + edges for i in range(batch_size)], axis=1).long())

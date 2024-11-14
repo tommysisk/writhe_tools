@@ -15,44 +15,38 @@ import os
 import scipy
 
 
-
 def sort_strs(strs: list, max=False, indexed: bool = False):
     """ strs ::: a list or numpy array of strings.
         max ::: bool, to sort in terms of greatest index to smallest.
         indexed ::: bool, whether or not to filter out strings that don't contain digits.
                     if set to False and string list (strs) contains strings without a digit, function
-                    will return unsorted string list (strs) as an alternative to throwing an error."""
+                    will return normally sorted string list (strs) as an alternative to throwing an error."""
 
     # we have to ensure that each str in strs contains a number otherwise we get an error
     assert len(strs) > 0, "List of strings is empty"
     check = np.vectorize(lambda s: any(map(str.isdigit, s)))
-
     if isinstance(strs, list):
         strs = np.array(strs)
-
     # the indexed option allows us to filter out strings that don't contain digits.
     ## This prevents an error
     if indexed:
         strs = strs[check(strs)]
         assert len(strs) > 0, "List of strings is empty after filtering strings without digits"
 
+        indices = np.vectorize(functools.partial(num_str, return_str=False, return_num=True))(strs).argsort()
+
+        return strs[np.flip(indices)] if max else strs[indices]
+
     # if indexed != True, then we don't filter the list of input strings and simply return it
-    ##because an attempt to sort on indices (digits) that aren't present results in an error
+    ##because an attempt to sort on digits that aren't present results in an error
     else:
         if not all(check(strs)):
             warnings.warn("Not all strings contain a number, returning unsorted input list to avoid throwing an error. "
                           "If you want to only consider strings that contain a digit, set indexed to True ")
-
+            strs.sort()
             return strs
 
-    get_index = np.vectorize(functools.partial(num_str, return_str=False, return_num=True))
-    indices = get_index(strs).argsort()
 
-    if max:
-        return strs[np.flip(indices)]
-
-    else:
-        return strs[indices]
 
 
 def lsdir(dir,
@@ -141,7 +135,8 @@ def flat_index(i: "row idx",
                d0: "degree of diag before flattening" = 0,
                triu: bool = False,
                ):
-    """retrieve index of data point in flattened matrix
+    """
+    retrieve index of data point in flattened matrix
     based on the indices the data point would have had in the unflattened matrix.
 
     If supdiagonals were removed from the original matrix before flattening, adjust
@@ -170,8 +165,8 @@ def triu_flat_indices(n: int, d0: int, d1: int = None):
     else:
         d1 = d0
 
-    args = dict(zip(["i", "j"], np.triu_indices(n, d1)))
-    return flat_index(**args, n=n, d0=d0, triu=True).astype(int)
+    return flat_index(**dict(zip(["i", "j"], np.triu_indices(n, d1))),
+                      n=n, d0=d0, triu=True).astype(int)
 
 
 def indices_stat(indices_list: list,
@@ -201,18 +196,12 @@ def group_by(keys: np.ndarray,
              reduction: callable = None):
 
     if reduction is not None:
-        values = np.ones_like(keys) / len(keys) if values is None else values
-
-        if values.squeeze().ndim > 1:
-
-            return np.stack([i[-1] for i in group_by_(keys=keys, values=values, reduction=reduction)])
-
-        else:
-            return np.asarray(group_by_(keys=keys, values=values, reduction=reduction))[:, -1]
-
-    values = np.arange(len(keys)) if values is None else values
-
-    return group_by_(keys).split_array_as_list(values)
+        values = np.ones_like(keys) / len(keys) if values is None else values.squeeze()
+        return np.stack([i[-1] for i in group_by_(keys=keys, values=values, reduction=reduction)]) if values.ndim > 1\
+                else np.asarray(group_by_(keys=keys, values=values, reduction=reduction))[:, -1]
+    else:
+        values = np.arange(len(keys)) if values is None else values
+        return group_by_(keys).split_array_as_list(values)
 
 
 def product(x: np.ndarray, y: np.ndarray):
@@ -245,7 +234,8 @@ def get_segments(n: int = None,
         return torch.from_numpy(segments).long() if tensor else segments
 
     else:
-        assert index0 is not None, ("If providing only one set of indices, must set the index0 argument \n"
+        assert index0 is not None, ("If providing only one set of indices,"
+                                    "must set the index0 argument and let index1 argument default to None  \n"
                                     "Cannot only supply the index1 argument (doesn't make sense in this context")
         if index1 is not None:
             segments = product(*[shifted_pairs(i, length) for i in (index0, index1)]).reshape(-1, 4)
@@ -256,7 +246,7 @@ def get_segments(n: int = None,
             return torch.from_numpy(segments).long() if tensor else segments
 
 
-def to_numpy(x: "int, list or array"):
+def to_numpy(x: "digit or iterable"):
     if isinstance(x, np.ndarray):
         return x
     if isinstance(x, (int, float, np.int64, np.int32, np.float32, np.float64)):
