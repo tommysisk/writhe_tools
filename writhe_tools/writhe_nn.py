@@ -70,7 +70,7 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor, ):
     theta = ((dots[:, :, u] * dots[:, :, v] - dots[:, :, h])
              / torch.sqrt(((1 - dots[:, :, u] ** 2) * (1 - dots[:, :, v] ** 2)).abs().clip(1e-10))
              ).clip(-1, 1).arcsin().sum(-1)
-    # signs
+    # signs from triple products
     signs = (dx[:, :, 0] * torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
                                        xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]], dim=-1)
              ).sum(-1).sign()

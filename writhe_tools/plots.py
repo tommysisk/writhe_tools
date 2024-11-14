@@ -524,7 +524,7 @@ def subplots_proj2d(x: np.ndarray,
                     ylabel=None,
                     xlabel=None,
                     title: str = None,
-                    title_pad=1.05,
+                    title_pad=0,
                     cbar_label: "str or list" = None,
                     font_scale: float = .6,
                     share_extent: bool = True,
@@ -533,7 +533,8 @@ def subplots_proj2d(x: np.ndarray,
                     vmin: float = None,
                     vmax: float = None,
                     bins: int = 100,
-                    figsize: tuple = (6, 5),
+                    aspect: str = "auto",
+                    figsize: tuple = None,
                     ):
     x = np.stack([x, y], -1) if y is not None else x
 
@@ -555,7 +556,9 @@ def subplots_proj2d(x: np.ndarray,
 
     extent = list(map(get_extrema, x.T)) if share_extent else None
 
-    fig, axes = plt.subplots(rows, cols, sharey=sharey, sharex=sharex, figsize=figsize)
+    figsize = (2 * cols, 1.5 * rows)
+
+    fig, axes = plt.subplots(rows, cols, sharey=sharey, sharex=sharex, figsize=figsize, constrained_layout=False)
 
     # if isinstance(cbar_label, str):
     #     cbar_label = len(indices_list) * [cbar_label]
@@ -576,9 +579,11 @@ def subplots_proj2d(x: np.ndarray,
                    font_scale=font_scale,
                    vmin=vmin,
                    vmax=vmax,
-                   cbar_shrink=1)
+                   cbar_shrink=1,
+                   aspect=aspect)
+        #ax.set_aspect(aspect)
 
-    fig.subplots_adjust(right=1.05, top=.9)
+    #fig.subplots_adjust(right=0.9, )#bottom=.2) # top=0.9
     fmtr = lambda x, _: f"{x:.3f}"
     c0, c1 = c.min(), c.max()
     cbar = fig.colorbar(s,
@@ -593,7 +598,9 @@ def subplots_proj2d(x: np.ndarray,
 
     cbar.ax.tick_params(labelsize=12 * font_scale)
     cbar.set_label(cbar_label, size=14 * font_scale)
-    fig.supylabel(ylabel)
-    fig.supxlabel(xlabel)
-    fig.suptitle(title, y=title_pad)
+    x_offset = cols * cbar.ax.get_position().width / fig.get_size_inches()[0]
+    fig.supylabel(ylabel, x= 0 - x_offset, size=(100/6) * font_scale)
+    bbox = ax.get_xaxis().get_label().get_window_extent()
+    fig.supxlabel(xlabel,  x = .5 - x_offset, y=bbox.y0 / (fig.bbox.height) - font_scale / 12 -.08*np.exp(1.4 - figsize[-1]), size=(100/6) * font_scale)#y=-title_pad-0.01,
+    fig.suptitle(title, y=1+title_pad, x = .5 - x_offset, size=(100/6) * font_scale)
     return

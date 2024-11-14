@@ -356,7 +356,8 @@ def add_intercept(x):
 def matrix_power(x,
                  power,
                  epsilon: float = 1e-12,
-                 dask=False, sym=True):
+                 dask=False,
+                 sym=False):
     if dask:
         u, s, vt = dask_svd(x)
 
@@ -381,6 +382,9 @@ def matrix_power(x,
 # beautiful linear regression
 def generalized_regression(x: np.ndarray, y: np.ndarray, weights: np.ndarray = None,
                            transform: bool = False, fit: bool = False, intercept: bool = True):
+
+    if weights.squeeze().ndim != 1:
+        weights = matrix_power(weights, 1/2)
     # prep covariance estimator
     cov_ = functools.partial(cov, shift=False, norm=False, weights=weights)
 

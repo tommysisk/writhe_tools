@@ -15,4 +15,5 @@ scikit-learn~=1.0.2
 numpy_indexed~=0.3.7
 tqdm~=4.63.0
 sklearn~=0.0.post9
-joblib~=1.4.2
+joblib~=1.1.0
+pyblock~=0.6

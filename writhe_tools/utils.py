@@ -15,6 +15,7 @@ import os
 import scipy
 
 
+
 def sort_strs(strs: list, max=False, indexed: bool = False):
     """ strs ::: a list or numpy array of strings.
         max ::: bool, to sort in terms of greatest index to smallest.
@@ -70,9 +71,7 @@ def lsdir(dir,
     if dir[-1] == "/":
         dir = dir[:-1]
 
-    listed_dir = os.listdir(dir)
-
-    listed_dir = filter_strs(listed_dir, keyword=keyword, exclude=exclude, match=match)
+    listed_dir = filter_strs(os.listdir(dir), keyword=keyword, exclude=exclude, match=match)
 
     return [f"{dir}/{i}" for i in sort_strs(listed_dir, indexed=indexed)]
 
@@ -95,18 +94,11 @@ def keyword_strs(strs: list,
                  exclude: bool = False,
                  match: callable = all):
     if isinstance(keyword, str):
-        if exclude:
-            filt = lambda string: keyword not in string
-
-        else:
-            filt = lambda string: keyword in string
-
+        filt = (lambda string: keyword not in string) if exclude else\
+               (lambda string: keyword in string)
     else:
-        if exclude:
-            filt = lambda string: match(kw not in string for kw in keyword)
-
-        else:
-            filt = lambda string: match(kw in string for kw in keyword)
+        filt = (lambda string: match(kw not in string for kw in keyword)) if exclude else\
+               (lambda string: match(kw in string for kw in keyword))
 
     return list(filter(filt, strs))
 
@@ -277,14 +269,22 @@ def to_numpy(x: "int, list or array"):
 
 def load_dict(file):
     with open(file, "rb") as handle:
-        dic_loaded = pickle.load(handle)
-    return dic_loaded
+        dict_loaded = pickle.load(handle)
+    return dict_loaded
 
 
 def save_dict(file, dict):
     with open(file, "wb") as handle:
         pickle.dump(dict, handle)
     return None
+
+
+def makedirs(path):
+    if os.path.exists(path):
+        return path
+    else:
+        os.makedirs(path)
+        return path
 
 
 class Timer:
@@ -317,11 +317,28 @@ class Timer:
         self.start = time.time()
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type, exc_value, trace_back):
         self.end = time.time()
         self.interval = self.end - self.start
         print(f"Time elapsed : {self.interval} s")
-        return self.interval
+        if exc_type is not None:
+            print(f"The following error occurred while timing the function {exc_value}")
+            return False
+
+        return False
+
+
+def catch_cuda_oom(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except RuntimeError as e:
+            print("Error occurred during CUDA enabled operation, cleaning up tensors on GPU:", e)
+            cleanup()  # Clear the CUDA cache to free memory
+            # Optionally, reattempt the function, raise an error, or handle it as needed
+    return wrapper
+
 
 def cleanup():
     gc.collect()  # Clean up unreferenced memory
@@ -465,11 +482,13 @@ def get_metrics(path):
 def get_extrema(x, extend: float = 0):
     return [x.min() - extend, x.max() + extend]
 
+
 def pmf1d(x: np.ndarray,
           bins: int,
           weights: np.ndarray = None,
           norm: bool = True,
           range: tuple = None):
+
     count, edge = np.histogram(x, bins=bins, weights=weights, range=range)
     p = count / count.sum() if norm else count
     idx = np.digitize(x, edge[1:-1])
@@ -540,6 +559,7 @@ def pmf(x: "list of arrays or array",
 
 
 def make_symbols():
+
     unicharacters = ["\u03B1",
                      "\u03B2",
                      "\u03B3",

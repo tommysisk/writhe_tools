@@ -1,5 +1,6 @@
 ﻿#!/usr/bin/env python
 __author__ = "Thomas.R.Sisk@DartmouthCollege"
+
 import os
 import ray
 import multiprocessing
@@ -20,6 +21,7 @@ from .utils import (save_dict,
                     to_numpy,
                     Timer,
                     window_average,
+                    catch_cuda_oom
                     )
 
 
@@ -45,6 +47,9 @@ def nnorm(x):
 
 def writhe_segment(segment=None, xyz=None):
     """
+    Version of the writhe computation written specifically for CPU + ray parallelization.
+    See writhe_tools.writhe_nn.wirthe_segments for cleaner implementation that is generally more efficient.
+    We use this version because ray manages memory and parallelization for large computations.
 
     compute the writhe (signed crossing) of 2 segments for all frames (index 0) in xyz (xyz can contain just one frame)
     **provide both of the following**
@@ -65,18 +70,18 @@ def writhe_segment(segment=None, xyz=None):
                                      [1, 2, 3, 2, 3, 3])], axis=-1)
     # indices
     u, v, h = [0, 4, 5, 1], \
-              [4, 5, 1, 0], \
-              [2, 3, 2, 3]
+        [4, 5, 1, 0], \
+        [2, 3, 2, 3]
 
     # surface area from scalars
 
     theta = np.sum([np.arcsin(((dots[:, i] * dots[:, j] - dots[:, k])
-             / np.sqrt(abs(((1 - dots[:, i] ** 2) * (1 - dots[:, j] ** 2))).clip(1e-10))
-             ).clip(-1, 1)) for i, j, k in zip(u, h, v)], axis=0)
+                               / np.sqrt(abs(((1 - dots[:, i] ** 2) * (1 - dots[:, j] ** 2))).clip(1e-10))
+                               ).clip(-1, 1)) for i, j, k in zip(u, h, v)], axis=0)
 
     signs = np.sign(np.sum(dx[:, 0] * np.cross(xyz[:, segment[3]] - xyz[:, segment[2]],
                                                xyz[:, segment[1]] - xyz[:, segment[0]], axis=-1),
-                              axis=-1)).squeeze()
+                           axis=-1)).squeeze()
 
     wr = (theta * signs) / (2 * np.pi)
 
@@ -95,7 +100,6 @@ def writhe_segments_along_axis(segments: np.ndarray, xyz: np.ndarray, axis: int 
 def calc_writhe_parallel(segments: np.ndarray,
                          xyz: np.ndarray,
                          cpus_per_job: int = 1) -> "Nframes by Nsegments np.ndarray":
-
     """parallelize writhe calculation by segment, avoids making multiple copies of coordinate (xyz) matrix using Ray shared memory"""
     # ray.init()
 
@@ -114,17 +118,20 @@ def writhe_batches_cuda(xyz: torch.Tensor,
                         device: int = 0):
     xyz = xyz.to(device)
     result = torch.cat([writhe_segments(xyz, i).cpu() for i in segments], axis=-1).numpy() \
-            if isinstance(segments, (list, tuple)) else writhe_segments(xyz=xyz, segments=segments).cpu().numpy()
+        if isinstance(segments, (list, tuple)) else writhe_segments(xyz=xyz, segments=segments).cpu().numpy()
     del xyz
     torch.cuda.empty_cache()
     return result
 
 
 # noinspection PyArgumentList
+
+
+
+@catch_cuda_oom
 def calc_writhe_parallel_cuda(xyz: torch.Tensor,
                               segments: torch.LongTensor,
                               batch_size: int = None) -> np.ndarray:
-
     batch_size = estimate_segment_batch_size(len(xyz)) if batch_size is None else batch_size
 
     if batch_size > len(segments):
@@ -139,8 +146,8 @@ def calc_writhe_parallel_cuda(xyz: torch.Tensor,
     else:
         minibatches = split_list(chunks, torch.cuda.device_count())
         return np.concatenate(Parallel(n_jobs=-1)(
-                delayed(writhe_batches_cuda)(xyz, j, i) for i, j in enumerate(minibatches)),
-                    axis=-1)
+            delayed(writhe_batches_cuda)(xyz, j, i) for i, j in enumerate(minibatches)),
+            axis=-1)
 
 
 def to_writhe_matrix(writhe_features, n_points, length):
@@ -164,7 +171,6 @@ def normalize_writhe(wr: np.ndarray, ax: int = None):
 
 
 class Writhe:
-    
     """Implementation of parallelized writhe calculation that is combinatorially efficient.
     This class also contains plotting methods that can be used when store_results == True
     when using compute_writhe method (defaults to True).
@@ -311,7 +317,7 @@ class Writhe:
         keys = ["writhe_features", "n_points", "n", "length", "segments"]
 
         file = (f"{dir}/writhe_data_dict_length_{self.length}" if dscr is None \
-               else f"{dir}/{dscr}_writhe_data_dict_length_{self.length}") + ".pkl"
+                    else f"{dir}/{dscr}_writhe_data_dict_length_{self.length}") + ".pkl"
 
         save_dict(file, {key: getattr(self, key) for key in keys})
 
@@ -429,13 +435,12 @@ class Writhe:
             rotation = 90 if key == "xticks" else None
 
             labels = labels[:-self.length][np.linspace(0,
-                                                       self.n_points-self.length-1,
-                                                       (self.n_points-self.length-1) // label_stride).astype(int)
-                                          ]
-
+                                                       self.n_points - self.length - 1,
+                                                       (self.n_points - self.length - 1) // label_stride).astype(int)
+            ]
 
             ticks = np.linspace(0,
-                                self.n_points-self.length-1,
+                                self.n_points - self.length - 1,
                                 len(labels))
 
             _ = getattr(ax, f"set_{key}")(ticks=ticks,
