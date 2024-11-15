@@ -4,13 +4,18 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import mdtraj as md
+import ray
 import warnings
+import multiprocessing
 from .utils import (save_dict,
                     load_dict,
                     to_numpy,
                     triu_flat_indices,
                     combinations,
-                    product)
+                    product,
+                    filter_strs,
+                    lsdir,
+                    )
 
 
 class ResidueDistances:
@@ -136,7 +141,7 @@ class ResidueDistances:
                             "label_stride": label_stride,
                             "font_scale": font_scale,
                             "ax": ax,
-                            "cmap" : cmap}
+                            "cmap": cmap}
 
         if line_plot_args is None:
             return plot_distance_matrix(**matrix_plot_args)
@@ -156,7 +161,163 @@ class ResidueDistances:
             build_grid_plot(matrix_plot_args, line_plot_args)
 
             return
+def rmsd_sort(indices: np.ndarray,
+              traj: md.Trajectory,
+              target_index: int = 0,
+              target_structure: md.Trajectory = None):
 
+    target = target_structure if target_structure is not None else traj[indices[target_index]]
+    return indices[md.rmsd(traj[indices], target).argsort()]
+
+
+def load_traj(dir: str,
+              traj_keyword: str = None,
+              pdb_keyword: str = None,
+              keyword: str = None,
+              exclude: str = None,
+              selection: str = None,
+              traj_ext: str = "dcd",
+              top_ext: str = "pdb",
+              stride: int = 1):
+    def check(x: list):
+        if len(x) == 1:
+            return x[0]
+        else:
+            raise Exception("Keyword search returned multiple files, cannot load without ambiguity")
+
+    extensions = [traj_ext, top_ext]
+
+    files = lsdir(dir, keyword=extensions, exclude=exclude, match=any)
+
+    if all(i is not None and isinstance(i, str) for i in (traj_keyword, pdb_keyword)):
+
+        dcd, pdb = [check(filter_strs(files, [ext, kw], match=all))
+                    for ext, kw in zip(extensions, [traj_keyword, pdb_keyword])]
+
+    else:
+
+        if keyword is None:
+            dcd, pdb = [check(filter_strs(files, keyword=ext, match=all))
+                        for ext in extensions]
+        else:
+
+            assert isinstance(keyword, (list, str)), "keyword must be list or str"
+
+            keyword = [keyword] if isinstance(keyword, str) else keyword
+
+            print(keyword)
+
+            dcd, pdb = [check(filter_strs(files, [ext] + keyword, match=all))
+                        for ext in extensions]
+
+    indices = None if selection is None else md.load(pdb).top.select(selection)
+
+    print(f"Loading Trajectory File : {dcd} with top file : {pdb}")
+
+    return md.load(dcd, top=pdb, atom_indices=indices, stride=stride), dcd, pdb
+
+
+def calc_sa(trj: "mdtraj Trajectory object",
+            helix: "str to helix pdb file or mdtraj object"):
+
+    helix = md.load(helix) if isinstance(helix, str) else helix
+
+    trj, helix = (traj_slice(i, "name CA").center_coordinates() for i in (trj, helix))
+
+    assert trj.n_atoms == helix.n_atoms, \
+        "trj and helix trajectories do not contain the same number of CA atoms"
+
+    selections = [f"resid {i} to {i + 5}" for i in range(0, trj.n_atoms - 5)]
+
+    rmsd = np.asarray([md.rmsd(trj, helix, atom_indices=helix.topology.select(selection))
+                       for selection in selections])
+
+    sa = (1.0 - (rmsd / 0.08) ** 8) / (1 - (rmsd / 0.08) ** 12)
+
+    return sa.T
+
+
+residue_volumes = dict(zip(['A', 'R', 'N', 'D', 'C', 'E', 'Q', 'G', 'H', 'I', 'L', 'K',
+                            'M', 'F', 'P', 'S', 'T', 'W', 'Y', 'V'],
+                           [121.0, 265.0, 187.0, 187.0, 148.0, 214.0, 214.0, 97.0,
+                            216.0, 195.0, 191.0, 230.0, 203.0, 228.0, 154.0, 143.0,
+                            163.0, 264.0, 255.0, 165.0]))
+
+
+def calc_rsa(traj: "traj object or str",
+             pdb: str = None,
+             file_name: str = None,
+             parallel=False,
+             cpus_per_job: int = 1,
+             ca_indices: np.ndarray = None):
+    if isinstance(traj, str):
+        assert pdb is not None, "If traj is a file, must pass pdb file to load traj"
+        traj = md.load(traj, top=pdb)
+
+    # helper functions to avoid making copies of the traj and
+    # implement iterations smoothly
+    traj_slice = lambda string: traj.atom_slice(traj.top.select(string))
+
+    # determine protein alpha carbon indices
+    if ca_indices is None:
+        ca_indices = traj.top.select("protein and name CA")
+
+    # find residue indices and codes of alpha carbons and atoms per residue
+    ## this approach avoids selecting ligand atoms and caps
+    ### (volume norms only available for the 20 canonical residues)
+
+    index, code, count = np.array([[getattr(traj.top.atom(int(i)).residue, attr)
+                                   for attr in ["index", "code", "n_atoms"]]
+                                   for i in ca_indices]).T
+    count = count.astype(int)
+
+    # make selection for residues of CA atoms
+    selection = " or ".join(map("resid {}".format, index))
+
+    # find normalization for particular sequence
+    norm = np.vectorize(residue_volumes.__getitem__)(code)
+
+    # compute sasa over all atoms of CA residues
+    if parallel:
+
+        # start ray instance
+        ray.init()
+
+        traj_ref = ray.put(traj_slice(selection))
+
+        fxn = ray.remote(lambda traj, index: md.shrake_rupley(traj[index]))
+
+        # chunk indices
+        chunks = np.array_split(np.arange(traj.n_frames),
+                                int(multiprocessing.cpu_count() / cpus_per_job))
+        # run parallelized code
+        sasa = np.concatenate(ray.get([fxn.remote(traj=traj_ref, index=index)
+                                       for index in chunks]))
+
+
+        # free memory, shutdown ray instance
+        ray.internal.free(traj_ref)
+        ray.shutdown()
+
+    else:
+        sasa = md.shrake_rupley(traj_slice(selection))
+
+    # MDTraj computes sasa by atom, we have to sum over residues
+    # MDTraj can organize by residues, but we don't trust MDTraj to get the right atoms
+    split = np.cumsum(count)[:-1]
+    residue_sasa = np.stack([s.sum(1) for s in np.array_split(sasa, split, 1)], 1)
+
+    # normalize and account for angstrom to nm conversion
+    rsa = 100 * residue_sasa / norm
+
+    # save data
+    if file_name is not None:
+        np.save(file_name, rsa)
+
+    return rsa
+
+def traj_slice(traj, selection):
+    return traj.atom_slice(traj.top.select(selection))
 
 
 def get_residues(traj,
@@ -167,12 +328,12 @@ def get_residues(traj,
     assert isinstance(indices, (np.ndarray, list)), "indices must be np.ndarray or list of np.ndarrays"
 
     func = (lambda index: traj.top.select(f"resid {int(index)}")) if atoms else (
-            lambda index: str(traj.top.residue(int(index))))
+        lambda index: str(traj.top.residue(int(index))))
 
     if isinstance(indices, np.ndarray):
         return func(indices) if len(indices) == 1 else \
             np.concatenate(list(map(func, indices))) if (cat and atoms) else \
-            list(map(func, indices))
+                list(map(func, indices))
     else:
         return [np.concatenate(list(map(func, i))) if (len(i) != 1 and cat and atoms) else
                 list(map(func, i)) if len(i) != 1 else func(i) for i in indices]
@@ -243,7 +404,6 @@ def plot_distance_matrix(matrix: np.ndarray,
                          ax=None,
                          hide_x: bool = False,
                          invert_yaxis: bool = True):
-
     assert matrix.ndim == 2, "Must be 2d matrix"
     n, m = matrix.shape
     args = locals()
@@ -398,7 +558,6 @@ def build_grid_plot(matrix_args: dict,
     matrix_args["xticks"] = None
     matrix_args["aspect"] = "auto"
     plot_distance_matrix(**matrix_args)
-    #fig.execute_constrained_layout()
+    # fig.execute_constrained_layout()
     lineplot1D(**line_args)
     return None
-
