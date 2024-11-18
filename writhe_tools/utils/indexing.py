@@ -20,6 +20,18 @@ def split_list(lst, n):
     return [lst[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n)]
 
 
+def make_index_function(x: np.ndarray, y: np.ndarray):
+    fxn = np.zeros(x.max() + 1)
+    fxn[x] = y
+    return np.vectorize(lambda i: fxn[i])
+
+
+def zero_index(dtraj: np.ndarray):
+    x = np.unique(dtraj)
+    y = np.arange(x.size)
+    return make_index_function(x, y)
+
+
 def reindex_list(unsorted_list: list, indices: "list or np.ndarray"):
     return list(map(unsorted_list.__getitem__, to_numpy(indices).astype(int)))
 
