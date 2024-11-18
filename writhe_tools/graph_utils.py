@@ -5,7 +5,7 @@ import torch
 import mdtraj
 from torch_geometric.data import Data as GeometricData
 from torch_geometric.data import InMemoryDataset
-from .utils import product
+from .utils.indexing import product
 
 
 class GraphDataSet(InMemoryDataset):

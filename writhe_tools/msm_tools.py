@@ -2,9 +2,7 @@ import numpy as np
 import functools
 import matplotlib.pyplot as plt
 import deeptime
-from .utils import (save_dict,
-                    load_dict,
-                    )
+from .utils.filing import save_dict, load_dict
 from .plots import get_color_list
 
 

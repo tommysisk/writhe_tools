@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from torch_scatter import scatter
 import math
-from .utils import get_segments, flat_index
+from .utils.indexing import get_segments, flat_index
 
 
 @torch.jit.script

@@ -13,16 +13,15 @@ import matplotlib.text
 import logging
 import torch
 import math
-from .utils import split_list, estimate_segment_batch_size, get_segments
-from .writhe_nn import writhe_segments
 from joblib import Parallel, delayed
-from .utils import (save_dict,
-                    load_dict,
-                    to_numpy,
-                    Timer,
-                    window_average,
-                    catch_cuda_oom
-                    )
+
+from .utils.indexing import split_list, get_segments
+from utils.torch_utils import estimate_segment_batch_size, catch_cuda_oom
+from .writhe_nn import writhe_segments
+from .utils.filing import save_dict, load_dict
+from .utils.misc import to_numpy, Timer
+from .stats import window_average
+
 
 
 class MplFilter(logging.Filter):
@@ -127,7 +126,6 @@ def writhe_batches_cuda(xyz: torch.Tensor,
 # noinspection PyArgumentList
 
 
-
 @catch_cuda_oom
 def calc_writhe_parallel_cuda(xyz: torch.Tensor,
                               segments: torch.LongTensor,
@@ -222,7 +220,8 @@ class Writhe:
                         segments: np.ndarray,
                         cpus_per_job: int,
                         cuda: bool,
-                        cuda_batch_size: int):
+                        cuda_batch_size: int,
+                        multi_proc: bool):
 
         if cuda and torch.cuda.is_available():
             return calc_writhe_parallel_cuda(segments=torch.from_numpy(segments).long(),
@@ -230,7 +229,14 @@ class Writhe:
                                              batch_size=cuda_batch_size)
         else:
             if cuda: print("You tried to use CUDA but it's not available according to torch, defaulting to CPUs.")
-            return calc_writhe_parallel(segments=segments, xyz=xyz, cpus_per_job=cpus_per_job)
+            if multi_proc:
+                return calc_writhe_parallel(segments=segments, xyz=xyz, cpus_per_job=cpus_per_job)
+            else:
+                warnings.warn("You are not using any multiprocessing! "
+                              "Multiprocessing on CPU is managed by ray"
+                              "and avoid issues with memory overflow.")
+                return writhe_segments(segments=torch.from_numpy(segments).long(),
+                                       xyz=torch.from_numpy(xyz)).numpy()
 
     def compute_writhe(self,
                        length: "Define segment size : CA[i] to CA[i+length], type : int",
@@ -241,7 +247,8 @@ class Writhe:
                        speed_test: "only test the speed of the calculation and return nothing" = False,
                        cpus_per_job: int = 1,
                        cuda: bool = False,
-                       cuda_batch_size: "number of segments to compute per batch if using cuda" = None
+                       cuda_batch_size: "number of segments to compute per batch if using cuda" = None,
+                       multi_proc: bool = True
                        ):
         """
         All arguments apart from length are not required (can be left as default)
@@ -280,7 +287,8 @@ class Writhe:
 
         if speed_test:
             with Timer():
-                _ = self.compute_writhe_(xyz, segments, cpus_per_job, cuda, cuda_batch_size)
+                _ = self.compute_writhe_(xyz, segments, cpus_per_job,
+                                         cuda, cuda_batch_size, multi_proc)
             return None
 
         results = dict(length=length,
@@ -288,7 +296,8 @@ class Writhe:
                        n=len(xyz),
                        )
 
-        results["writhe_features"] = self.compute_writhe_(xyz, segments, cpus_per_job, cuda, cuda_batch_size)
+        results["writhe_features"] = self.compute_writhe_(xyz, segments, cpus_per_job,
+                                                          cuda, cuda_batch_size, multi_proc)
 
         results["segments"] = segments
 
@@ -316,7 +325,7 @@ class Writhe:
 
         keys = ["writhe_features", "n_points", "n", "length", "segments"]
 
-        file = (f"{dir}/writhe_data_dict_length_{self.length}" if dscr is None \
+        file = (f"{dir}/writhe_data_dict_length_{self.length}" if dscr is None
                     else f"{dir}/{dscr}_writhe_data_dict_length_{self.length}") + ".pkl"
 
         save_dict(file, {key: getattr(self, key) for key in keys})

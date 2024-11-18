@@ -1,21 +1,17 @@
 #!/usr/bin/env python
 
 import numpy as np
-import matplotlib
-import matplotlib.pyplot as plt
 import mdtraj as md
 import ray
 import warnings
 import multiprocessing
-from .utils import (save_dict,
-                    load_dict,
-                    to_numpy,
-                    triu_flat_indices,
-                    combinations,
-                    product,
-                    filter_strs,
-                    lsdir,
-                    )
+from .utils.filing import save_dict, load_dict
+from .utils.misc import to_numpy
+from utils.indexing import (triu_flat_indices,
+                            combinations,
+                            product,)
+from .utils.sorting import filter_strs, lsdir
+from .plots import plot_distance_matrix, build_grid_plot
 
 
 class ResidueDistances:
@@ -161,6 +157,7 @@ class ResidueDistances:
             build_grid_plot(matrix_plot_args, line_plot_args)
 
             return
+
 def rmsd_sort(indices: np.ndarray,
               traj: md.Trajectory,
               target_index: int = 0,
@@ -256,7 +253,7 @@ def calc_rsa(traj: "traj object or str",
 
     # helper functions to avoid making copies of the traj and
     # implement iterations smoothly
-    traj_slice = lambda string: traj.atom_slice(traj.top.select(string))
+    traj_slice_ = lambda string: traj.atom_slice(traj.top.select(string))
 
     # determine protein alpha carbon indices
     if ca_indices is None:
@@ -283,7 +280,7 @@ def calc_rsa(traj: "traj object or str",
         # start ray instance
         ray.init()
 
-        traj_ref = ray.put(traj_slice(selection))
+        traj_ref = ray.put(traj_slice_(selection))
 
         fxn = ray.remote(lambda traj, index: md.shrake_rupley(traj[index]))
 
@@ -300,7 +297,7 @@ def calc_rsa(traj: "traj object or str",
         ray.shutdown()
 
     else:
-        sasa = md.shrake_rupley(traj_slice(selection))
+        sasa = md.shrake_rupley(traj_slice_(selection))
 
     # MDTraj computes sasa by atom, we have to sum over residues
     # MDTraj can organize by residues, but we don't trust MDTraj to get the right atoms
@@ -315,6 +312,7 @@ def calc_rsa(traj: "traj object or str",
         np.save(file_name, rsa)
 
     return rsa
+
 
 def traj_slice(traj, selection):
     return traj.atom_slice(traj.top.select(selection))
@@ -343,7 +341,9 @@ def to_distance_matrix(distances: np.ndarray,
                        n: int,
                        m: int = None,
                        d0: int = 1):
-    assert (distances.ndim == 2), "Must input a flattened distance array (n,d)"
+    distances = distances.squeeze()
+    assert distances.ndim < 3, "distances must be either 1 or two dimensional"
+    distances = distances.reshape(1, -1) if distances.ndim < 2 else distances
 
     # info about flattened distance matrix
     N, d = distances.shape
@@ -353,13 +353,13 @@ def to_distance_matrix(distances: np.ndarray,
         matrix = np.zeros([N] + [n] * 2)
         i, j = np.triu_indices(n, d0)
         matrix[:, i, j] = distances
-        return matrix + matrix.transpose(0, 2, 1)
+        return (matrix + matrix.transpose(0, 2, 1)).squeeze()
 
     else:
         assert d == n * m, \
             "Given dimensions (n,m) do not correspond to the dimension of the flattened distances"
 
-        return distances.reshape(-1, n, m)
+        return distances.reshape(-1, n, m).squeeze()
 
 
 def residue_distances(traj,
@@ -380,184 +380,3 @@ def to_contact_matrix(distances: np.ndarray, cut_off: float = 0.5):
     return np.where(distances < cut_off, 1, 0)
 
 
-def plot_distance_matrix(matrix: np.ndarray,
-                         xlabel: str = None,
-                         xlabel_rotation: float = None,
-                         ylabel_rotation: float = 90,
-                         ylabel: str = None,
-                         xticks: "list or np.ndarray" = None,
-                         yticks: "list or np.ndarray" = None,
-                         xticks_rotation: float = 90,
-                         yticks_rotation: float = None,
-                         label_stride: int = None,
-                         title: str = None,
-                         cbar: bool = True,
-                         cmap: str = "jet",
-                         cbar_label: str = None,
-                         cbar_label_rotation: float = -90,
-                         vmin: float = None,
-                         vmax: float = None,
-                         alpha_lines: float = 0,
-                         norm: bool = None,
-                         aspect: str = None,
-                         font_scale: float = 1,
-                         ax=None,
-                         hide_x: bool = False,
-                         invert_yaxis: bool = True):
-    assert matrix.ndim == 2, "Must be 2d matrix"
-    n, m = matrix.shape
-    args = locals()
-
-    cmap = getattr(plt.cm, cmap)
-
-    if ax is None:
-        fig, ax = plt.subplots(1)
-
-    s = ax.imshow(matrix, cmap=cmap, aspect=aspect,
-                  norm=norm, vmax=vmax, vmin=vmin,
-                  )
-    ax.set_title(label=title, size=10 * font_scale)
-    ax.tick_params(size=3 * font_scale, labelsize=7 * font_scale)
-
-    ax.set_xlabel(xlabel=xlabel, size=10.2 * font_scale,
-                  rotation=xlabel_rotation)
-
-    ax.set_ylabel(ylabel=ylabel, size=10.2 * font_scale,
-                  rotation=ylabel_rotation, labelpad=13 + font_scale)
-    if cbar:
-        cbar = plt.colorbar(s, ax=ax, label=cbar_label,
-                            fraction=0.046, pad=0.02,
-                            )
-
-        cbar.set_label(cbar_label, rotation=cbar_label_rotation,
-                       size=10 * font_scale, labelpad=12 + np.exp(font_scale))
-
-        cbar.ax.tick_params(labelsize=8 * font_scale)
-
-    for dim, key in zip([m, n], ["xticks", "yticks"]):
-
-        val = args[key]
-        if val is not None:
-            assert len(val) == dim, f"{key} don't match matrix dimension"
-
-            loc = np.arange(0, len(val))[::label_stride]
-            val = val[::label_stride]
-
-            _ = getattr(ax, f"set_{key}")(loc,
-                                          val,
-                                          rotation=args[f"{key}_rotation"])
-    if hide_x:
-        ax.tick_params(axis='x',  # changes apply to the x-axis
-                       which='both',  # both major and minor ticks are affected
-                       bottom=False,  # ticks along the bottom edge are off
-                       top=False,  # ticks along the top edge are off
-                       labelbottom=False,
-                       size=0)
-
-        ax.set_xlabel("", labelpad=0, size=0)
-
-    if invert_yaxis:
-        ax.invert_yaxis()
-
-    return s
-
-
-def lineplot1D(x, y,
-               color: str = None,
-               ls: str = None,
-               lw: float = None,
-               marker: str = None,
-               mfc: str = None,
-               mec: str = None,
-               fill_color: str = None,
-               fill_alpha: float = None,
-               title: str = None,
-               xlabel: "list or np.ndarray" = None,
-               xlabel_rotation: float = None,
-               ylabel_rotation: float = None,
-               ylabel: "list or np.ndarray" = None,
-               xticks: "list or np.ndarray" = None,
-               yticks: "list or np.ndarray" = None,
-               xticks_rotation: float = 90,
-               yticks_rotation: float = None,
-               ymin: float = None,
-               ymax: float = None,
-               xmin: float = None,
-               xmax: float = None,
-               label_stride: int = None,
-               label: str = None,
-               font_scale: float = 1,
-               hide_title: bool = False,
-               ax=None,
-               ):
-    args = locals()
-    n, m = map(len, (y, x))
-
-    if ax is None:
-        fig, ax = plt.subplots(1)
-
-    if hide_title:
-        ax.set_title(label="", size=0)
-    else:
-        ax.set_title(label=title, size=13 * font_scale)
-
-    ax.tick_params(size=3 * font_scale, labelsize=6 * font_scale)
-
-    ax.set_xlabel(xlabel=xlabel, size=12 * font_scale,
-                  rotation=xlabel_rotation, )
-
-    ax.set_ylabel(ylabel=ylabel, size=12 * font_scale,
-                  rotation=ylabel_rotation, labelpad=11 * font_scale)
-
-    if len(list(filter(None, (ymin, ymax)))) != 0: ax.set_ylim(ymin, ymax)
-    if len(list(filter(None, (xmin, xmax)))) != 0: ax.set_xlim(xmin, xmax)
-
-    ax.margins(x=0, y=0)
-
-    s = ax.plot(x, y, color=color, ls=ls,
-                lw=lw, marker=marker,
-                mfc=mfc, mec=mec, label=label)
-
-    if label is not None:
-        ax.legend()
-
-    if fill_color is not None:
-        ax.fill_between(x, y, color=fill_color, alpha=fill_alpha)
-
-    for dim, key in zip([m, n], ["xticks", "yticks"]):
-        val = args[key]
-        if val is not None:
-            assert len(val) == dim, f"{key} don't match matrix dimension"
-            loc = np.arange(0, len(val))[::label_stride]
-            val = val[::label_stride]
-            _ = getattr(ax, f"set_{key}")(loc,
-                                          val,
-                                          rotation=args[f"{key}_rotation"],
-                                          )
-
-    return s
-
-
-def build_grid_plot(matrix_args: dict,
-                    line_args: dict,
-                    size: int = 1.5):
-    fig = plt.figure(figsize=(3 * size, 3.1 * size),
-                     constrained_layout=True)
-    grid = matplotlib.gridspec.GridSpec(nrows=6, ncols=3, figure=fig, hspace=.001, wspace=0.2,
-                                        top=.92)
-
-    ax0 = fig.add_subplot(grid[:-1, :])
-    ax1 = fig.add_subplot(grid[-1, :], sharex=ax0)
-    matrix_args["ax"] = ax0
-    line_args["ax"] = ax1
-    line_args["font_scale"] = 1
-    line_args["hide_title"] = True
-    matrix_args["font_scale"] = 1.2
-    matrix_args["hide_x"] = True
-    matrix_args["xlabel"] = None
-    matrix_args["xticks"] = None
-    matrix_args["aspect"] = "auto"
-    plot_distance_matrix(**matrix_args)
-    # fig.execute_constrained_layout()
-    lineplot1D(**line_args)
-    return None
