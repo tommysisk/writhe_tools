@@ -502,7 +502,6 @@ def subplots_fes2d(x: np.ndarray,
              else [get_extrema(i, extend_border) for i in np.concatenate(x)]) if extent is None and share_extent\
              else extent
 
-
     fig, axes = plt.subplots(rows, cols, sharey=sharey, sharex=sharex, figsize=figsize)
 
     if weights_list is None:
@@ -604,6 +603,7 @@ def proj2d(x: np.ndarray,
            cbar_label: str = None,
            cbar_labels: str = None,
            cmap: str = "jet",
+           cbar_norm=None,
            alpha: float = 1,
            cluster_centers: np.ndarray = None,
            center_font_color: str = "black",
@@ -665,7 +665,8 @@ def proj2d(x: np.ndarray,
                            alpha=alpha, vmin=vmin, vmax=vmax)
             c0, c1 = s.get_clim()
             cbar = plt.colorbar(s, ax=ax, format=fmtr, shrink=cbar_shrink,
-                                ticks=np.linspace(c0, c1, 4, endpoint=True))
+                                ticks=np.linspace(c0, c1, 4, endpoint=True),
+                                norm=cbar_norm)
             cbar.set_label(cbar_label, size=12 * font_scale)
         cbar.ax.tick_params(labelsize=9 * font_scale)
 

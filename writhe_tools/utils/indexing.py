@@ -117,6 +117,18 @@ def indices_stat(indices_list: list,
 def group_by(keys: np.ndarray,
              values: np.ndarray = None,
              reduction: callable = None):
+    """
+    Performs grouping of the values based on keys and can perform an operation
+    on all items of a key's set of values. Is a generalized version of torch_scatter
+    for numpy arrays and a few special cases ...
+
+    If only a set of keys are passed (like the labels of a clustering),
+    the function returns the sets of indices belonging to each key.
+
+    If only a reduction value is given, sets the values to 1
+    in order for this function to be used to count the number of
+    times each key is seen.
+    """
     if reduction is not None:
         values = np.ones_like(keys) / len(keys) if values is None else values.squeeze()
         return np.stack([i[-1] for i in group_by_(keys=keys, values=values, reduction=reduction)]) if values.ndim > 1 \

@@ -1,17 +1,20 @@
 #!/usr/bin/env python
 import numpy as np
 import time
+import torch
 
 
 def to_numpy(x: "digit or iterable"):
     if isinstance(x, np.ndarray):
         return x
-    if isinstance(x, (int, float, np.int64, np.int32, np.float32, np.float64)):
+    if isinstance(x, (int, float, str, np.int64, np.int32, np.float32, np.float64)):
         return np.array([x])
     if isinstance(x, list):
         return np.asarray(x)
     if isinstance(x, (map, filter, tuple)):
         return np.asarray(list(x))
+    if isinstance(x, torch.Tensor):
+        return x.numpy()
 
 
 class Timer:

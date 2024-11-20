@@ -16,7 +16,7 @@ import math
 from joblib import Parallel, delayed
 
 from .utils.indexing import split_list, get_segments
-from utils.torch_utils import estimate_segment_batch_size, catch_cuda_oom
+from .utils.torch_utils import estimate_segment_batch_size, catch_cuda_oom
 from .writhe_nn import writhe_segments
 from .utils.filing import save_dict, load_dict
 from .utils.misc import to_numpy, Timer
@@ -69,8 +69,8 @@ def writhe_segment(segment=None, xyz=None):
                                      [1, 2, 3, 2, 3, 3])], axis=-1)
     # indices
     u, v, h = [0, 4, 5, 1], \
-        [4, 5, 1, 0], \
-        [2, 3, 2, 3]
+              [4, 5, 1, 0], \
+              [2, 3, 2, 3]
 
     # surface area from scalars
 
@@ -234,7 +234,7 @@ class Writhe:
             else:
                 warnings.warn("You are not using any multiprocessing! "
                               "Multiprocessing on CPU is managed by ray"
-                              "and avoid issues with memory overflow.")
+                              "and avoids issues with memory overflow.")
                 return writhe_segments(segments=torch.from_numpy(segments).long(),
                                        xyz=torch.from_numpy(xyz)).numpy()
 

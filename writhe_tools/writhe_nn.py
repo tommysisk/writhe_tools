@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 import torch
 import torch.nn as nn
 from torch_scatter import scatter
@@ -240,7 +239,7 @@ def gaussian_binning(low: float,
     """
     number += 2
     # Generate a Gaussian PDF over the specified symmetric range
-    x = torch.linspace(low, high, 500000)  # we only compute this once
+    x = torch.linspace(low, high, 500000)  # we only compute this once (yee haw)
     pdf = torch.distributions.Normal(loc=mean, scale=std).log_prob(x).exp()
     # Normalize the PDF so that it sums to 1
     pdf /= torch.sum(pdf)
