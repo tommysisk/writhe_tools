@@ -4,7 +4,7 @@ import functools
 import numpy as np
 from deeptime.numeric import spd_inv_split
 from scipy.linalg import svd
-from stats import cov, dask_svd
+from .stats import cov, dask_svd
 
 
 class CCA:

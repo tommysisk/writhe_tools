@@ -6,7 +6,7 @@ import warnings
 import os
 
 
-def num_str(s, return_str=True, return_num=True):
+def num_str(s, return_str=False, return_num=True):
     s = ''.join(filter(str.isdigit, s))
     if return_str and return_num:
         return s, int(s)

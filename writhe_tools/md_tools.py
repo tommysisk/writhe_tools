@@ -5,7 +5,7 @@ import warnings
 import multiprocessing
 from .utils.filing import save_dict, load_dict
 from .utils.misc import to_numpy
-from utils.indexing import (triu_flat_indices,
+from .utils.indexing import (triu_flat_indices,
                             combinations,
                             product,)
 from .utils.sorting import filter_strs, lsdir
@@ -212,12 +212,12 @@ def load_traj(dir: str,
     return md.load(dcd, top=pdb, atom_indices=indices, stride=stride), dcd, pdb
 
 
-def calc_sa(trj: "mdtraj Trajectory object",
-            helix: "str to helix pdb file or mdtraj object"):
+def calc_sa(trj: "str to traj file or mdtraj Trajectory object",
+            helix: "str to helix pdb file or mdtraj object",
+            ):
 
-    helix = md.load(helix) if isinstance(helix, str) else helix
-
-    trj, helix = (traj_slice(i, "name CA").center_coordinates() for i in (trj, helix))
+    trj, helix = (traj_slice(j, "name CA").center_coordinates() for j in
+                 (md.load(i) if isinstance(i, str) else i for i in (trj, helix)))
 
     assert trj.n_atoms == helix.n_atoms, \
         "trj and helix trajectories do not contain the same number of CA atoms"
