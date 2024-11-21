@@ -129,7 +129,8 @@ def writhe_batches_cuda(xyz: torch.Tensor,
 @catch_cuda_oom
 def calc_writhe_parallel_cuda(xyz: torch.Tensor,
                               segments: torch.LongTensor,
-                              batch_size: int = None) -> np.ndarray:
+                              batch_size: int = None,
+                              multi_proc: bool = True) -> np.ndarray:
     batch_size = estimate_segment_batch_size(len(xyz)) if batch_size is None else batch_size
 
     if batch_size > len(segments):
@@ -138,7 +139,7 @@ def calc_writhe_parallel_cuda(xyz: torch.Tensor,
     split = math.ceil(len(segments) / batch_size)
     chunks = torch.tensor_split(segments, split)
 
-    if len(segments) < 5 * batch_size or torch.cuda.device_count() == 1:
+    if len(segments) < 5 * batch_size or torch.cuda.device_count() == 1 or not multi_proc:
         return writhe_batches_cuda(xyz, chunks, device=0)
 
     else:
@@ -226,7 +227,8 @@ class Writhe:
         if cuda and torch.cuda.is_available():
             return calc_writhe_parallel_cuda(segments=torch.from_numpy(segments).long(),
                                              xyz=torch.from_numpy(xyz),
-                                             batch_size=cuda_batch_size)
+                                             batch_size=cuda_batch_size,
+                                             multi_proc=multi_proc)
         else:
             if cuda: print("You tried to use CUDA but it's not available according to torch, defaulting to CPUs.")
             if multi_proc:
@@ -240,16 +242,16 @@ class Writhe:
 
     def compute_writhe(self,
                        length: "Define segment size : CA[i] to CA[i+length], type : int",
-                       matrix: "Make symmetric writhe matrix" = False,
-                       store_results: "Bind calculation results to class for plotting" = True,
+                       matrix: "Make symmetric writhe matrix, type : bool" = False,
+                       store_results: "Bind calculation results to class for plotting, type : bool" = True,
                        xyz: "Coordinates to use in writhe calculation (n, points/atoms, 3), type : np.ndarray" = None,
                        n_points: "Number of points in each topology used to estimate segments, type : int " = None,
-                       speed_test: "only test the speed of the calculation and return nothing" = False,
-                       cpus_per_job: int = 1,
-                       cuda: bool = False,
-                       cuda_batch_size: "number of segments to compute per batch if using cuda" = None,
-                       multi_proc: bool = True
-                       ):
+                       speed_test: "Test the speed of the calculation and return nothing, type : bool" = False,
+                       cpus_per_job: "Number of CPUs to allocate to each batch, type : int" = 1,
+                       cuda: "Use cuda enabled devices to compute the writhe (will multiprocess if available), type : bool" = False,
+                       cuda_batch_size: "Number of segments to compute per batch if using cuda, type : bool" = None,
+                       multi_proc: "Use multi_processing in calculation (applies to either CPU or GPU), type : bool" = True,
+                       ) -> dict:
         """
         All arguments apart from length are not required (can be left as default)
          when this class is instantiated with xyz coordinates.
