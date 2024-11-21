@@ -99,6 +99,10 @@ If left as None, a conservative guess of the appropriate batch will be used.
 NOTE the class will automatically switch to CPU calculation if cuda is not available.
 
 Below we show how to compute the writhe, save the results and restore the class from the saved results.
+
+NOTE: The *compute_writhe* method returns a dictionary of the results. 
+If store_result=True, there's no need to assign a variable to the return.
+
 ```jupyterpython
 # compute the writhe using segment length 1 and default arguments
 writhe.compute_writhe(length=1)
@@ -107,17 +111,23 @@ writhe.save(path=None, dscr=None)
 # restore the calculation at a later time
 restored_writhe = Writhe("./writhe_data_dict_length_1.pkl")
 ```
+NOTE: the argument, store_result, of *compute_writhe* must be set to True in order to plot or save calculation
+results. It defaults to True. 
+
+
 The results are saved as a pickled python dictionary with a pre-defined name:
 ```jupyterpython
 f"{path}/{dscr}_writhe_data_dict_length_{self.length}.pkl"
 ```
-Where *path* and *dscr* are optional parameters of the *save* method and can be used to define the directory and a file description
-to save the result under, respectively.
+Or if path and dscr are left to None:
+```jupyterpython 
+f"./writhe_data_dict_length_{self.length}.pkl"
+```
 
 
-The class also has the plotting methods with many options
+The class also has plotting methods with many options
 ```jupyterpython
-self.plot_writhe_matrix(
+writhe.plot_writhe_matrix(
     ave=True,                     # ave: bool = True
                                  # (Averages the writhe matrix across frames by default)
     index=None,                   # index: Optional[Union[int, List[int], str, np.ndarray]] = None
