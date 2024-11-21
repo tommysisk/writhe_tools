@@ -72,36 +72,39 @@ from writhe_tools.writhe import Writhe
 writhe = Writhe(xyz=xyz)
 ```
 To compute the writhe at a given segment length, we use the class method, compute_writhe. This method has many options. Here's an example
-with descriptions of the arguments. 
+with descriptions of the arguments. Note that only the argument defining the segment length, **length**, is required. 
+
 ```jupyterpython
 results = writhe.compute_writhe(
-    length=1,  # Default segment length
-    matrix=False,  # Default: Do not return the symmetric writhe matrix
-    store_results=True,  # Default: Bind calculation results to class for plotting
-    xyz=None,  # Default: Use the coordinates from the class instance (self.xyz)
-    n_points=None,  # Default: Use n_points from the class instance (self.n_points)
-    speed_test=False,  # Default: Do not perform speed test
-    cpus_per_job=1,  # Default: Use 1 CPU per job
-    cuda=False,  # Default: Do not use CUDA (use CPU instead)
-    cuda_batch_size=None,  # Default: No batch size for CUDA (not used since cuda=False)
-    multi_proc=True  # Default: Use multi-processing
-)
+          length=1,  # Default segment length
+          matrix=False,  # Default: Do not return the symmetric writhe matrix
+          store_results=True,  # Default: Bind calculation results to class for plotting
+          xyz=None,  # Default: Use the coordinates from the class instance (self.xyz)
+          n_points=None,  # Default: Use n_points from the class instance (self.n_points)
+          speed_test=False,  # Default: Do not perform speed test
+          cpus_per_job=1,  # Default: Use 1 CPU per job
+          cuda=False,  # Default: Do not use CUDA (use CPU instead)
+          cuda_batch_size=None,  # Default: No batch size for CUDA (not used since cuda=False)
+          multi_proc=True  # Default: Use multi-processing
+        )
 ```
 The class method, *compute_writhe* is defined so that any set of coordinates can be dropped in to the calculation. However, leaving the argument as default
 will use the coordinates (xyz) the class was instantiated with. 
 
-The only required argument is length (int), which defines the segment length (see our paper). The other arguments allow 
-specification of the compute strategy. Multiprocessing is supported for both GPU and CPU computation. By default, the 
-method performs a multiprocessed CPU computation (multi_proc=True, cuda=False). GPUs (multi_proc=True/False, cuda=True) 
-will substantially increase performance. The GPU batch size can be manually set (cuda_batch_size) and should be if GPU memory errors are encountered.
-If left as None, a conservative guess of the appropriate batch will be used.
+The only required argument is length (int), which defines the segment length (see our paper). 
 
-NOTE the class will automatically switch to CPU calculation if cuda is not available.
 
 Below we show how to compute the writhe, save the results and restore the class from the saved results.
 
-NOTE: The *compute_writhe* method returns a dictionary of the results. 
-If store_result=True, there's no need to assign a variable to the return.
+- NOTES:
+  - the argument, **store_result**, of *compute_writhe* must be set to True in order to plot or save calculation
+  results. It defaults to True. 
+  - The *compute_writhe* method returns a dictionary of the results. However,
+  if store_result=True, there's no need to assign a variable to the return.
+
+  - The class will automatically switch to CPU calculation if cuda is not available.
+
+
 
 ```jupyterpython
 # compute the writhe using segment length 1 and default arguments
@@ -111,8 +114,7 @@ writhe.save(path=None, dscr=None)
 # restore the calculation at a later time
 restored_writhe = Writhe("./writhe_data_dict_length_1.pkl")
 ```
-NOTE: the argument, store_result, of *compute_writhe* must be set to True in order to plot or save calculation
-results. It defaults to True. 
+NOTE: 
 
 
 The results are saved as a pickled python dictionary with a pre-defined name:
