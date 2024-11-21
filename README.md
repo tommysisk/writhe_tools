@@ -71,20 +71,21 @@ We can now instantiate an instance of the Writhe class.
 from writhe_tools.writhe import Writhe
 writhe = Writhe(xyz=xyz)
 ```
-To compute the writhe at a given segment length, we use the class method, compute_writhe. This method has many options. Here's a pseudo definition of the class method
+To compute the writhe at a given segment length, we use the class method, compute_writhe. This method has many options. Here's an example
 with descriptions of the arguments. 
 ```jupyterpython
-writhe.compute_writhe(length: "Define segment size : CA[i] to CA[i+length], type : int",
-                       matrix: "Return symmetric writhe matrix, type : bool" = False,
-                       store_results: "Bind calculation results to class for plotting, type : bool" = True,
-                       xyz: "Coordinates to use in writhe calculation (n, points/atoms, 3), type : np.ndarray" = None,
-                       n_points: "Number of points in each topology used to estimate segments, type : int " = None,
-                       speed_test: "Test the speed of the calculation and return nothing, type : bool" = False,
-                       cpus_per_job: "Number of CPUs to allocate to each batch, type : int" = 1,
-                       cuda: "Use cuda enabled devices to compute the writhe (will multiprocess if available), type : bool" = False,
-                       cuda_batch_size: "Number of segments to compute per batch if using cuda, type : bool" = None,
-                       multi_proc: "Use multi_processing in calculation (applies to either CPU or GPU), type : bool" = True,
-                       ):->dict
+results = writhe.compute_writhe(
+    length=1,  # Default segment length
+    matrix=False,  # Default: Do not return the symmetric writhe matrix
+    store_results=True,  # Default: Bind calculation results to class for plotting
+    xyz=None,  # Default: Use the coordinates from the class instance (self.xyz)
+    n_points=None,  # Default: Use n_points from the class instance (self.n_points)
+    speed_test=False,  # Default: Do not perform speed test
+    cpus_per_job=1,  # Default: Use 1 CPU per job
+    cuda=False,  # Default: Do not use CUDA (use CPU instead)
+    cuda_batch_size=None,  # Default: No batch size for CUDA (not used since cuda=False)
+    multi_proc=True  # Default: Use multi-processing
+)
 ```
 The class method, *compute_writhe* is defined so that any set of coordinates can be dropped in to the calculation. However, leaving the argument as default
 will use the coordinates (xyz) the class was instantiated with. 
@@ -102,26 +103,66 @@ Below we show how to compute the writhe, save the results and restore the class 
 # compute the writhe using segment length 1 and default arguments
 writhe.compute_writhe(length=1)
 # save the result with default arguments (None), will make a file in working directory called "./writhe_data_dict_length_1.pkl"
-writhe.save(dir=None, dscr=None)
+writhe.save(path=None, dscr=None)
 # restore the calculation at a later time
 restored_writhe = Writhe("./writhe_data_dict_length_1.pkl")
 ```
 The results are saved as a pickled python dictionary with a pre-defined name:
 ```jupyterpython
-f"{dir}/{dscr}_writhe_data_dict_length_{self.length}.pkl"
+f"{path}/{dscr}_writhe_data_dict_length_{self.length}.pkl"
 ```
-Where *dir* and *dscr* are optional parameters of the *save* method and can be used to define the directory and a file description
+Where *path* and *dscr* are optional parameters of the *save* method and can be used to define the directory and a file description
 to save the result under, respectively.
 
 
-The class also has the plotting methods, defined in pseudo code, below: 
+The class also has the plotting methods with many options
 ```jupyterpython
-writhe.plot_writhe_matrix(ave=True, index: "int or list or str" = None,
-                           absolute=False, xlabel: str = None, ylabel: str = None,
-                           xticks: np.ndarray = None, yticks: np.ndarray = None,
-                           label_stride: int = 5, dscr: str = None,
-                           font_scale: float = 1, ax=None)->matplotlib.pyplot.figure:
+self.plot_writhe_matrix(
+    ave=True,                     # ave: bool = True
+                                 # (Averages the writhe matrix across frames by default)
+    index=None,                   # index: Optional[Union[int, List[int], str, np.ndarray]] = None
+                                 # (Plots the average writhe matrix if index is None)
+    absolute=False,               # absolute: bool = False
+                                 # (Uses signed writhe values by default)
+    xlabel=None,                  # xlabel: Optional[str] = None
+                                 # (No custom label for the x-axis, default will be used)
+    ylabel=None,                  # ylabel: Optional[str] = None
+                                 # (No custom label for the y-axis, default will be used)
+    xticks=None,                  # xticks: Optional[np.ndarray] = None
+                                 # (No custom xticks provided, default will be used)
+    yticks=None,                  # yticks: Optional[np.ndarray] = None
+                                 # (No custom yticks provided, default will be used)
+    label_stride=5,               # label_stride: int = 5
+                                 # (Tick labels will be spaced every 5 units by default)
+    dscr=None,                    # dscr: Optional[str] = None
+                                 # (No description for the subset of frames averaged)
+    font_scale=1,                 # font_scale: float = 1
+                                 # (Font size will be at the default scale)
+    ax=None                       # ax: Optional[plt.Axes] = None
+                                 # (No custom Axes object provided, so a new figure will be created)
+)
 
+writhe.plot_writhe_per_segment(
+    ave=True,                      # ave: bool = True
+                                  # (Averages over all frames by default)
+    index=None,                    # index: Optional[Union[int, List[int], str, np.ndarray]] = None
+                                  # (Plots the average writhe per segment if index is None)
+    xticks=None,                   # xticks: Optional[List[str]] = None
+                                  # (No custom xticks are provided; default range is used)
+    label_stride=5,                # label_stride: int = 5
+                                  # (Tick labels are spaced every 5 segments by default)
+    dscr=None,                     # dscr: Optional[str] = None
+                                  # (No description for the averaged indices)
+    ax=None                        # ax: Optional[plt.Axes] = None
+                                  # (No custom Axes object provided; a new figure will be created)
+)
+
+self.plot_writhe_total(
+    window=None,           # window: Optional[int] = None
+                           # (No window averaging applied; raw data is used)
+    ax=None                # ax: Optional[plt.Axes] = None
+                           # (No custom Axes object provided; a new figure will be created)
+)
 
 ```
 

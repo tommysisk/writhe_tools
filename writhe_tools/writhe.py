@@ -14,6 +14,8 @@ import logging
 import torch
 import math
 from joblib import Parallel, delayed
+from typing import Optional, Union, Tuple, List
+
 
 from .utils.indexing import split_list, get_segments
 from .utils.torch_utils import estimate_segment_batch_size, catch_cuda_oom
@@ -171,41 +173,28 @@ def normalize_writhe(wr: np.ndarray, ax: int = None):
 
 class Writhe:
     """Implementation of parallelized writhe calculation that is combinatorially efficient.
-    This class also contains plotting methods that can be used when store_results == True
-    when using compute_writhe method (defaults to True).
-    
-    This class does not compute redundant values (zeros, nans and repeats by definition of writhe) BUT can organize
-    and sort non-redundant calculation results into (redundant) symmetric matrices for visualization
-    and adacency/connectivity matrices for graphs. As a result, it is highly recommended to use the
-    save and load methods of this class so that large and redundant symmetric matrices are not saved
-    to memory. The preferred work flow is to save results using the save method and restore this class
-    from the resulting file using the load method.
 
-    It is highly recommended to use this class to compute writhe when using this package to ensure
-    correctness and maximum efficiency. Writhe should never be computed between all possible segments
-    generated for a given length as this guarantees the calculation will be more than twice as expensive
-    as compared to the combinatorially efficient approach implemented in this class.
-    
-    ARGS:
-    xyz : coordinate matrix ::: type : np.ndarray ::: shape : (Nframes, Natoms, 3) :::
-    assumes atoms are alpha carbons but don't need to be
-    (adjust axis label arguments accordingly if they're provided as args to plotting methods)
-    
-    Most of the arguments of the methods for computing writhe are redundant when computing writhe
-    for the same coordinates the class is instantiated with apart from the chosen length scale.
-    The arguments are there for completeness and to allow a class instance to be used
-    like a function so that the same class instance can be used to compute writhe at multiple length scales"""
+    Includes plotting methods and utilities for saving and loading computation results efficiently.
+    """
 
-    def __init__(self,
-                 xyz: np.ndarray = None,
-                 args: dict = None,
-                 **kwargs):
+    def __init__(
+            self,
+            xyz: Optional[np.ndarray] = None,
+            args: Optional[dict] = None,
+            **kwargs
+    ) -> None:
+        """
+        Initialize the Writhe instance.
 
+        Args:
+            xyz (np.ndarray, optional): Coordinate matrix (Nframes, Natoms, 3).
+            args (dict, optional): Additional arguments to initialize class attributes.
+            kwargs: Arbitrary keyword arguments to initialize class attributes.
+        """
         self.__dict__.update(kwargs)
 
         if args is not None:
             self.__dict__.update(args)
-
         else:
             self.xyz = xyz
             self.writhe_features = None
@@ -216,13 +205,28 @@ class Writhe:
             else:
                 self.n_points, self.n = None, None
 
-    def compute_writhe_(self,
-                        xyz: np.ndarray,
+    @staticmethod
+    def compute_writhe_(xyz: np.ndarray,
                         segments: np.ndarray,
                         cpus_per_job: int,
                         cuda: bool,
                         cuda_batch_size: int,
-                        multi_proc: bool):
+                        multi_proc: bool,
+                        ) -> np.ndarray:
+        """
+        Perform the writhe computation using either CPU or GPU parallelization.
+
+        Args:
+            xyz (np.ndarray): Coordinate matrix (Nframes, Natoms, 3).
+            segments (np.ndarray): Indices defining the segments to compute writhe.
+            cpus_per_job (int): Number of CPUs to allocate per batch (if not using GPU).
+            cuda (bool): Whether to use CUDA-enabled GPU for computation.
+            cuda_batch_size (int): Number of segments per batch for CUDA computation.
+            multi_proc (bool): Whether to use multiprocessing.
+
+        Returns:
+            np.ndarray: Computed writhe features.
+        """
 
         if cuda and torch.cuda.is_available():
             return calc_writhe_parallel_cuda(segments=torch.from_numpy(segments).long(),
@@ -241,36 +245,35 @@ class Writhe:
                                        xyz=torch.from_numpy(xyz)).numpy()
 
     def compute_writhe(self,
-                       length: "Define segment size : CA[i] to CA[i+length], type : int",
-                       matrix: "Make symmetric writhe matrix, type : bool" = False,
-                       store_results: "Bind calculation results to class for plotting, type : bool" = True,
-                       xyz: "Coordinates to use in writhe calculation (n, points/atoms, 3), type : np.ndarray" = None,
-                       n_points: "Number of points in each topology used to estimate segments, type : int " = None,
-                       speed_test: "Test the speed of the calculation and return nothing, type : bool" = False,
-                       cpus_per_job: "Number of CPUs to allocate to each batch, type : int" = 1,
-                       cuda: "Use cuda enabled devices to compute the writhe (will multiprocess if available), type : bool" = False,
-                       cuda_batch_size: "Number of segments to compute per batch if using cuda, type : bool" = None,
-                       multi_proc: "Use multi_processing in calculation (applies to either CPU or GPU), type : bool" = True,
-                       ) -> dict:
+                       length: int,
+                       matrix: bool = False,
+                       store_results: bool = True,
+                       xyz: Optional[np.ndarray] = None,
+                       n_points: Optional[int] = None,
+                       speed_test: bool = False,
+                       cpus_per_job: int = 1,
+                       cuda: bool = False,
+                       cuda_batch_size: Optional[int] = None,
+                       multi_proc: bool = True,
+                       ) -> Optional[dict]:
         """
-        All arguments apart from length are not required (can be left as default)
-         when this class is instantiated with xyz coordinates.
+        Compute writhe at the specified segment length.
 
-        The matrix argument allow for symmetric writhe matrices to be constructed
-        and returned by this method. However, these matrices can be automatically generated after
-        the calculation at any time using the matrix method if calculation results are saved.
-        Additionally, these matrices will be automatically generated but not saved into memory when using the
-        plot writhe matrix method.
+        Args:
+            length (int): Segment length for computation.
+            matrix (bool): Whether to generate a symmetric writhe matrix. Default: False.
+            store_results (bool): Whether to store results in the class instance. Default: True.
+            xyz (np.ndarray, optional): Coordinates to use for computation.
+            n_points (int, optional): Number of points in the topology.
+            speed_test (bool): Whether to perform a speed test without storing results.
+            cpus_per_job (int): Number of CPUs to allocate per batch.
+            cuda (bool): Whether to use CUDA for computation.
+            cuda_batch_size (int, optional): Batch size for CUDA computation.
+            multi_proc (bool): Whether to enable multiprocessing.
 
-        WARNING: this class is designed to encourage workflows where redundant symmetric matrices
-        only exist in memory transiently while plotting. There is almost never a good reason to
-        clog memory with symmetric matrices. This is particular true when using writhe data
-        as an INPUT for data science methods : passing redundant inputs/repeated data points to data science methods
-        has no benefit and will needlessly make computations more expensive.
-
-        WARNING: in addition to the above warning, explicitly putting symmetric writhe matrices into memory
-        can cause kernels to break and memory to overflow needlessly.
-         """
+        Returns:
+            dict: Results of the computation, including writhe features and segments.
+        """
 
         if xyz is None:
             assert self.xyz is not None, \
@@ -315,27 +318,44 @@ class Writhe:
 
         return results
 
-    def save(self, dir: str = None, dscr: str = None):
+    def save(self,
+             path: Optional[str] = None,
+             dscr: Optional[str] = None,
+            ) -> None:
+
+        """
+        Save the current writhe data to a file.
+
+        Args:
+            path (str, optional): Directory to save the file. Default: current directory.
+            dscr (str, optional): Description to include in the filename.
+        """
 
         self.check_data()
 
-        if dir is not None:
-            if not os.path.isdir(dir):
-                os.makedirs(dir)
+        if path is not None:
+            if not os.path.isdir(path):
+                os.makedirs(path)
         else:
-            dir = os.getcwd()
+            path = os.getcwd()
 
         keys = ["writhe_features", "n_points", "n", "length", "segments"]
 
-        file = (f"{dir}/writhe_data_dict_length_{self.length}" if dscr is None
-                    else f"{dir}/{dscr}_writhe_data_dict_length_{self.length}") + ".pkl"
+        file = (f"{path}/writhe_data_dict_length_{self.length}" if dscr is None
+                    else f"{path}/{dscr}_writhe_data_dict_length_{self.length}") + ".pkl"
 
         save_dict(file, {key: getattr(self, key) for key in keys})
 
         return
 
     @classmethod
-    def load(cls, file):
+    def load(cls, file: str):
+        """
+        Arg:
+            file : a pickled python dictionary saved by this class
+        Return:
+            An restored instance of this class with data retrieved from file
+        """
         return cls(args=load_dict(file))
 
     @property
@@ -349,12 +369,21 @@ class Writhe:
         return
 
     def matrix(self,
-               n_points: "number of points in each topology to estimate segments, type : int" = None,
-               length: int = None,
-               writhe_features: np.ndarray = None):
+               n_points: Optional[int] = None,
+               length: Optional[int] = None,
+               writhe_features: Optional[np.ndarray] = None) -> np.ndarray:
+        """
+        Convenience function for reindexing and sorting non-redundant
+        writhe calculation into a symmetric matrix (redundant) for visualization.
 
-        """convenience function for reindexing and sorting non-redundant
-         writhe calculation into symmetric matrix (redundant) for visualization"""
+        Args:
+            n_points (Optional[int], optional): Number of points in each topology to estimate segments. Defaults to None.
+            length (Optional[int], optional): Length of each segment for writhe calculation. Defaults to None.
+            writhe_features (Optional[np.ndarray], optional): The writhe feature array to use. Defaults to None.
+
+        Returns:
+            np.ndarray: A symmetric matrix representing the writhe features.
+        """
 
         self.check_data()
 
@@ -363,11 +392,43 @@ class Writhe:
         length = length if length is not None else self.length
         return to_writhe_matrix(writhe_features, n_points, length)
 
-    def plot_writhe_matrix(self, ave=True, index: "int or list or str" = None,
-                           absolute=False, xlabel: str = None, ylabel: str = None,
-                           xticks: np.ndarray = None, yticks: np.ndarray = None,
-                           label_stride: int = 5, dscr: str = None,
-                           font_scale: float = 1, ax=None):
+    def plot_writhe_matrix(self,
+                           ave: bool = True,
+                           index: Optional[Union[int, List[int], str, np.ndarray]] = None,
+                           absolute: bool = False,
+                           xlabel: Optional[str] = None,
+                           ylabel: Optional[str] = None,
+                           xticks: Optional[np.ndarray] = None,
+                           yticks: Optional[np.ndarray] = None,
+                           label_stride: int = 5,
+                           dscr: Optional[str] = None,
+                           font_scale: float = 1,
+                           ax: Optional[plt.Axes] = None) -> None:
+        """
+        Plots the writhe matrix for visualizing writhe values in topological frames.
+
+        This method provides a way to display a matrix of writhe values, optionally averaged across frames
+        or for a specific subset of frames. The matrix can be visualized with absolute values or as signed writhe.
+
+        Args:
+            ave (bool, optional): If True, averages the writhe matrix across frames. Defaults to True.
+            index (Optional[Union[int, List[int], str, np.ndarray]], optional): Frame index or indices to plot. Can be a single integer, list of integers, 'str', or numpy.ndarray. Defaults to None.
+            absolute (bool, optional): If True, takes the absolute value of the writhe. Defaults to False.
+            xlabel (Optional[str], optional): Label for the x-axis. Defaults to None.
+            ylabel (Optional[str], optional): Label for the y-axis. Defaults to None.
+            xticks (Optional[np.ndarray], optional): Array or list of tick labels for the x-axis. Defaults to None.
+            yticks (Optional[np.ndarray], optional): Array or list of tick labels for the y-axis. Defaults to None.
+            label_stride (int, optional): Interval to reduce tick labels for visualization. Defaults to 5.
+            dscr (Optional[str], optional): Description for the subset of frames averaged, if applicable. Defaults to None.
+            font_scale (float, optional): Scale factor for font sizes. Defaults to 1.
+            ax (Optional[plt.Axes], optional): Matplotlib Axes object to plot on. If None, a new figure is created. Defaults to None.
+
+        Returns:
+            None: Displays the plot using Matplotlib.
+
+        Raises:
+            AssertionError: If `index` is provided incorrectly or if ticks don't match the number of points used in writhe calculation.
+        """
 
         self.check_data()
 
@@ -462,7 +523,17 @@ class Writhe:
 
         pass
 
-    def plot_writhe_total(self, window=None, ax=None):
+    def plot_writhe_total(self, window: Optional[int] = None, ax: Optional[plt.Axes] = None) -> None:
+        """
+        Plots the total absolute writhe across time steps.
+
+        Args:
+            window (Optional[int], optional): The size of the window for moving average smoothing. Defaults to None.
+            ax (Optional[plt.Axes], optional): Matplotlib Axes object to plot on. If None, a new figure is created. Defaults to None.
+
+        Returns:
+            None: Displays the plot using Matplotlib.
+        """
 
         self.check_data()
 
@@ -487,13 +558,31 @@ class Writhe:
         pass
 
     def plot_writhe_per_segment(self,
-                                ave=True,
-                                index=None,
-                                xticks: list = None,
+                                ave: bool = True,
+                                index: Optional[Union[int, List[int], str, np.ndarray]] = None,
+                                xticks: Optional[List[str]] = None,
                                 label_stride: int = 5,
-                                dscr: str = None,
-                                ax=None, ):
+                                dscr: Optional[str] = None,
+                                ax: Optional[plt.Axes] = None) -> None:
+        """
+        Plots the total absolute writhe per segment across time steps.
 
+        This method can either plot the average total writhe across frames, or plot the writhe for a specific frame (or set of frames).
+
+        Args:
+            ave (bool, optional): If True, averages the writhe across frames. Defaults to True.
+            index (Optional[Union[int, List[int], str, np.ndarray]], optional): Frame index or indices to plot. Can be a single integer, list of integers, 'str', or numpy.ndarray. Defaults to None.
+            xticks (Optional[List[str]], optional): List of tick labels for the x-axis. Defaults to None.
+            label_stride (int, optional): Interval for displaying tick labels. Defaults to 5.
+            dscr (Optional[str], optional): Description for the subset of frames averaged, if applicable. Defaults to None.
+            ax (Optional[plt.Axes], optional): Matplotlib Axes object to plot on. If None, a new figure is created. Defaults to None.
+
+        Returns:
+            None: Displays the plot using Matplotlib.
+
+        Raises:
+            AssertionError: If `index` is not specified when `ave` is False.
+        """
         self.check_data()
         writhe_total = abs(self.matrix()).sum(1)
 
