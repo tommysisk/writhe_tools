@@ -62,9 +62,7 @@ xyz = trajectory.center_coordinates().xyz
 ```
 
 NOTE: it is generally sufficient to compute the writhe using only the coordinates of the alpha carbons. In principle, one could include all backbone atoms
-or even more nuanced selections if one is looking to more specific geometric element. In general, however,
-we did not find the addition of more backbone atoms particularly useful in our study.
-
+compute it over arbitrary points, however. 
 
 We can now instantiate an instance of the Writhe class.
 ```jupyterpython
@@ -88,19 +86,19 @@ results = writhe.compute_writhe(
           multi_proc=True  # Default: Use multi-processing
         )
 ```
-The class method, *compute_writhe* is defined so that any set of coordinates can be dropped in to the calculation. However, leaving the argument as default
+The class method, *compute_writhe* is defined so that any set of coordinates (**xyz**, **n_points**)
+can be dropped in to the calculation.
+However, leaving the argument as default
 will use the coordinates (xyz) the class was instantiated with. 
-
-The only required argument is length (int), which defines the segment length (see our paper). 
 
 
 Below we show how to compute the writhe, save the results and restore the class from the saved results.
 
 - NOTES:
-  - the argument, **store_result**, of *compute_writhe* must be set to True in order to plot or save calculation
-  results. It defaults to True. 
-  - The *compute_writhe* method returns a dictionary of the results. However,
-  if store_result=True, there's no need to assign a variable to the return.
+  - The *compute_writhe* method returns a dictionary of the results. If store_result=True, there's no need to assign a variable to the return.
+
+  - the argument, **store_result**, of *compute_writhe* must be set to True (Default) in order to plot or save calculation
+  results. 
 
   - The class will automatically switch to CPU calculation if cuda is not available.
 
