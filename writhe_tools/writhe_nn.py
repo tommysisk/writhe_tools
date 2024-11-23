@@ -56,19 +56,24 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor):
     # catch any lazy arguments
     segments, xyz = segments.unsqueeze(0) if segments.ndim < 2 else segments, \
                       xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
+
     # displacement vectors between end points
     dx = nnorm((-xyz[:, segments[:, :2], None] + xyz[:, segments[:, None, 2:]]
                 ).reshape(-1, len(segments), 4, 3))
+
     # compute all dot products, then work with scalars
     dots = (dx[:, :, [0, 0, 0, 1, 1, 2]] * dx[:, :, [1, 2, 3, 2, 3, 3]]).sum(-1)
+
     # get indices; dots is ordered according to indices of 3,3 upper right triangle
     u, v, h = [0, 4, 5, 1], \
               [4, 5, 1, 0], \
               [2, 3, 2, 3]
+
     # surface area from scalars
     theta = ((dots[:, :, u] * dots[:, :, v] - dots[:, :, h])
              / torch.sqrt(((1 - dots[:, :, u] ** 2) * (1 - dots[:, :, v] ** 2)).abs().clip(1e-10))
              ).clip(-1, 1).arcsin().sum(-1)
+
     # signs from triple products
     signs = (dx[:, :, 0] * torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
                                        xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]], dim=-1)
