@@ -14,6 +14,7 @@ setup(
     version='1',
     packages=find_packages(),
     install_requires=install_requires,
+    python_requires="~=3.10.14",
     url='',
     license='',
     author='Thomas Sisk',

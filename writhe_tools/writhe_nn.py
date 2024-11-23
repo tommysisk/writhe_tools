@@ -12,7 +12,7 @@ def nnorm(x: torch.Tensor):
 
 
 @torch.jit.script
-def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor, ):
+def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor):
     """
     Compute the writhe (signed crossing) of 2 segment pairs for NSegments and all frames (index 0) in xyz
     (xyz can contain just one frame).
@@ -126,7 +126,7 @@ class WritheMessage(nn.Module):
         self.register_buffer("segment_length", torch.LongTensor([segment_length]))
 
         self.node_attr = node_attr
-        self.distance_attr = distance_attr
+        self.distance_attr = distance_attr or "NONE"
         self.n_features = n_features
         self.residual = residual
         self.bin_low = bin_low
@@ -165,18 +165,12 @@ class WritheMessage(nn.Module):
 
         src_node, dst_node = (i.flatten() for i in self.edges)
         writhe = self.compute_writhe(x)
-
         # derive attention weights from distances
-        if self.distance_attr is not None:
-            if hasattr(x, self.distance_attr):
-                logits = getattr(x, self.distance_attr)[self.distance_indices].pow(2).neg()
-
-        else:
-            # if no distances computed, compute them
-            logits = (x.x[src_node] - x.x[dst_node]).norm(dim=-1).pow(2).neg()
-
+        # if no distances computed, compute them
+        weights = (getattr(x, self.distance_attr)[self.distance_indices]
+                   if hasattr(x, self.distance_attr or "_NONE")
+                   else (x.x[src_node] - x.x[dst_node]).norm(dim=-1)).pow(2).neg().exp()
         # get attention weights, softmax normalize, scatter
-        weights = torch.exp(logits)
         attention = (weights / scatter(weights, dst_node)[dst_node]).unsqueeze(-1)
         message = scatter(writhe * attention, dst_node, dim=0)
 

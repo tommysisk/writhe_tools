@@ -78,7 +78,7 @@ def writhe_segment(segment=None, xyz=None):
 
     theta = np.sum([np.arcsin(((dots[:, i] * dots[:, j] - dots[:, k])
                                / np.sqrt(abs(((1 - dots[:, i] ** 2) * (1 - dots[:, j] ** 2))).clip(1e-10))
-                               ).clip(-1, 1)) for i, j, k in zip(u, h, v)], axis=0)
+                               ).clip(-1, 1)) for i, j, k in zip(u, v, h)], axis=0)
 
     signs = np.sign(np.sum(dx[:, 0] * np.cross(xyz[:, segment[3]] - xyz[:, segment[2]],
                                                xyz[:, segment[1]] - xyz[:, segment[0]], axis=-1),

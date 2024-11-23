@@ -56,9 +56,11 @@ Here, we use MDTraj to load the trajectory.
 
 ```jupyterpython
 import mdtraj as md 
-atom_indices = md.load("example.pdb").top.select("name = CA")
-trajectory = md.load("example.xtc", top="example.pdb", atom_indices=atom_indices)
-xyz = trajectory.center_coordinates().xyz
+atom_indices = 
+xyz = md.load("example.xtc", top="example.pdb",
+              atom_indices=md.load("example.pdb").top.select("name = CA")
+              ).center_coordinates().xyz
+
 ```
 
 NOTE: it is generally sufficient to compute the writhe using only the coordinates of the alpha carbons. In principle, one could include all backbone atoms
