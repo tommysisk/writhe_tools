@@ -80,8 +80,7 @@ from the saved result to continue analysis or visualization.
 
 writhe.compute_writhe(length=1)
 
-# save the result with default arguments (None), 
-# will make a file in working directory called "./writhe_data_dict_length_1.pkl"
+# save the result with default arguments (None, see below next code block)
 
 writhe.save(path=None, dscr=None)
 
