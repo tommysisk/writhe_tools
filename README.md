@@ -84,8 +84,8 @@ writhe.compute_writhe(length=1)
 
 writhe.save(path=None, dscr=None)
 
-# restore the calculation at a later time
-restored_writhe = Writhe("./writhe_data_dict_length_1.pkl")
+# restore the calculation at a later time using the CLASS method, load
+restored_writhe = Writhe.load("./writhe_data_dict_length_1.pkl")
 ```
 
 The results are saved as a pickled python dictionary with a pre-defined name:
