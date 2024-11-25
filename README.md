@@ -100,7 +100,7 @@ f"./writhe_data_dict_length_{self.length}.pkl"
  The *compute_writhe* method has many options. Here's an example with descriptions of all the arguments.
  Only the argument defining the segment length, **length**, is required. Note that calculation can be performed 
 on multiple (**multi_proc**=True) CPU or GPU (**cuda**=True) devices. If using GPUs, it is best to avoid interactive kernels like jupyter notebooks due 
-to known issues with clearing GPU memory and to manually set cuda_batch_size to avoid out of memory errors. 
+to known issues with clearing GPU memory and to manually set **cuda_batch_size** to avoid out of memory errors. 
 
 ```jupyterpython
 results = writhe.compute_writhe(
