@@ -77,6 +77,7 @@ from the saved result to continue analysis or visualization.
 
 ```jupyterpython
 # compute the writhe using segment length 1 and default arguments
+
 writhe.compute_writhe(length=1)
 
 # save the result with default arguments (None), 
@@ -85,6 +86,7 @@ writhe.compute_writhe(length=1)
 writhe.save(path=None, dscr=None)
 
 # restore the calculation at a later time using the CLASS method, load
+
 restored_writhe = Writhe.load("./writhe_data_dict_length_1.pkl")
 ```
 
