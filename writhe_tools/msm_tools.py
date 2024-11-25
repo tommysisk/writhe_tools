@@ -359,7 +359,7 @@ class MarkovModel:
         else:
             assert dtraj is not None, "Must input a discrete trajectory (dtraj:::np.ndarray) if args is None"
             self.dtraj = dtraj
-            self.n_states = dtraj.max() + 1
+            self.n_states = (dtraj.max() if isinstance(dtraj, np.ndarray) else max(map(max, dtraj))) + 1
             self.dt = dt
             self.msm, self.hmm, self.pcca = [dict() for _ in range(3)]
             self.lag = None

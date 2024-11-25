@@ -285,7 +285,7 @@ def fes2d(x: np.ndarray,
           weights: np.ndarray = None,
           density: bool = False,
           extent: list = None,
-          n_contours: int = 200,
+          n_contours: int = 7,
           alpha_contours: float = 1,
           contour_lines: bool = False,
           alpha_lines: float = 0.6,
@@ -325,7 +325,7 @@ def fes2d(x: np.ndarray,
     counts, x_edges, y_edges = np.histogram2d(x, y, bins=bins, range=extent,
                                               weights=weights, density=density)
 
-    xticks, yticks = (i[:-1] + np.diff(i) / 2 for i in (x_edges, y_edges))
+    #xticks, yticks = (i[:-1] + np.diff(i) / 2 for i in (x_edges, y_edges))
 
     mask_index = counts <= mask_thresh
 
@@ -348,7 +348,7 @@ def fes2d(x: np.ndarray,
         #extent = None
 
     s = ax.contourf(F.T,
-                    n_contours,
+                    levels=n_contours,
                     cmap=cmap,
                     extent=tuple(chain(*extent)), #if extent is not None and extend_border != 0 else None,
                     zorder=-1,
@@ -358,7 +358,7 @@ def fes2d(x: np.ndarray,
                     )
 
     if contour_lines:
-        ax.contour(s, colors="black", cmap=None, linewidths=1, alpha=alpha_lines)
+        ax.contour(s, levels=s.levels, colors="black", cmap=None, linewidths=1, alpha=alpha_lines)
 
     fmtr = lambda x, _: f"{x:.2f}"
 
@@ -369,16 +369,6 @@ def fes2d(x: np.ndarray,
 
     ax.set_xlabel(xlabel, fontsize=14 * font_scale)
     ax.set_ylabel(ylabel, fontsize=14 * font_scale)
-
-    # ax.set_xticks(np.linspace(nxticks, bins - nxticks, nxticks), sample_array(xticks,
-    #                                                                           nxticks,
-    #                                                                           figs=tick_decimals))
-    # ax.set_yticks(np.linspace(nyticks, bins - nyticks, nyticks), sample_array(yticks,
-    #                                                                           nyticks,
-    #                                                                           figs=tick_decimals))
-    # print(sample_array(yticks,
-    #                                                                           nyticks,
-    #                                                                           figs=tick_decimals))
     ax.tick_params(axis="x", labelsize=10 * font_scale)
     ax.tick_params(axis="y", labelsize=10 * font_scale)
 
@@ -393,20 +383,23 @@ def fes2d(x: np.ndarray,
     ax.set_yticks(np.linspace(extent[1][0], extent[1][1], nyticks),
                   np.linspace(extent[1][0], extent[1][1], nyticks).round(tick_decimals))
 
-    # ax.set_xticklabels(sample_array(xticks,
-    #                               nxticks,
-    #                               figs=tick_decimals).astype(str))
-    #
-    # ax.set_yticklabels(sample_array(yticks,
-    #                               nyticks,
-    #                               figs=tick_decimals).astype(str))
 
     if cbar:
-        cbar = plt.colorbar(s, ax=ax, format=fmtr,
+        if contour_lines:
+            cbar_ticks = s.levels[1:] - np.diff(s.levels) / 2
+
+        else:
+            cbar_ticks = np.linspace(s.levels[0], s.levels[-1], num = 4, endpoint=True)
+
+        cbar = plt.colorbar(s,
+                            ax=ax,
+                            format=fmtr,
                             shrink=cbar_shrink,
-                            ticks=np.linspace(F.min(), F.max(), 4, endpoint=True))
+                            ticks=cbar_ticks)
+
         cbar.set_label("Free Energy / (kT)", size=14 * font_scale)
         cbar.ax.tick_params(labelsize=8)
+
 
     # ax.set_aspect(aspect=aspect, share=True)
 
@@ -425,11 +418,11 @@ def fes2d(x: np.ndarray,
                     s=scatter_size)
 
         #ax1.autoscale_view()
-        if hide_ax:
-            pass
-            # ax1.set_axis_off()
-            # ax1.axis("off")
-            # ax.set_frame_on(False)
+        # if hide_ax:
+        #     pass
+        #     # ax1.set_axis_off()
+        #     # ax1.axis("off")
+        #     # ax.set_frame_on(False)
 
     if cluster_centers is not None:
         # ax2 = ax.twinx().twiny()
@@ -439,11 +432,11 @@ def fes2d(x: np.ndarray,
         for j, i in enumerate(cluster_centers):
             ax.annotate(f"{j + 1}", [i[k] for k in range(2)],
                          color="black", size=str(10 * font_scale))
-        if hide_ax:
-            pass
-            # ax2.set_axis_off()
-            # ax2.axis("off")
-            # ax2.set_frame_on(False)
+        # if hide_ax:
+        #     pass
+        #     # ax2.set_axis_off()
+        #     # ax2.axis("off")
+        #     # ax2.set_frame_on(False)
 
     if hide_ax:
         ax.set_axis_off()

@@ -64,15 +64,44 @@ xyz = md.load("example.xtc", top="example.pdb",
 ```
 
 NOTE: it is generally sufficient to compute the writhe using only the coordinates of the alpha carbons. In principle, one could include all backbone atoms
-compute it over arbitrary points, however. 
+or any selection of contiguous atoms or points.
 
 We can now instantiate an instance of the Writhe class.
 ```jupyterpython
 from writhe_tools.writhe import Writhe
 writhe = Writhe(xyz=xyz)
 ```
-To compute the writhe at a given segment length, we use the class method, compute_writhe. This method has many options. Here's an example
-with descriptions of the arguments. Note that only the argument defining the segment length, **length**, is required. 
+
+We can then compute the writhe at a given segment length, save the result for later and then restore the class
+from the saved result to continue analysis or visualization.
+
+```jupyterpython
+# compute the writhe using segment length 1 and default arguments
+writhe.compute_writhe(length=1)
+
+# save the result with default arguments (None), 
+# will make a file in working directory called "./writhe_data_dict_length_1.pkl"
+
+writhe.save(path=None, dscr=None)
+
+# restore the calculation at a later time
+restored_writhe = Writhe("./writhe_data_dict_length_1.pkl")
+```
+
+The results are saved as a pickled python dictionary with a pre-defined name:
+```jupyterpython
+f"{path}/{dscr}_writhe_data_dict_length_{self.length}.pkl"
+```
+Or if path and dscr are left to None:
+```jupyterpython
+f"./writhe_data_dict_length_{self.length}.pkl"
+```
+ The *compute_writhe* method has many options. Here's an example with descriptions of all the arguments.
+ Only the argument defining the segment length, **length**, is required. Note that calculation can be performed 
+on multiple (multi_proc=True) CPU or GPU (cuda=True) devices. The method defaults to a multiprocessed CPU calculation
+but can be greatly expedited with GPUs. If using GPUs, it is best to avoid interactive kernels like jupyter notebooks due 
+to known issues with clearing GPU memory. One may also have to manually set cuda_batch_size to avoid out of
+memory errors. 
 
 ```jupyterpython
 results = writhe.compute_writhe(
@@ -104,27 +133,6 @@ Below we show how to compute the writhe, save the results and restore the class 
 
   - The class will automatically switch to CPU calculation if cuda is not available.
 
-
-
-```jupyterpython
-# compute the writhe using segment length 1 and default arguments
-writhe.compute_writhe(length=1)
-# save the result with default arguments (None), will make a file in working directory called "./writhe_data_dict_length_1.pkl"
-writhe.save(path=None, dscr=None)
-# restore the calculation at a later time
-restored_writhe = Writhe("./writhe_data_dict_length_1.pkl")
-```
-NOTE: 
-
-
-The results are saved as a pickled python dictionary with a pre-defined name:
-```jupyterpython
-f"{path}/{dscr}_writhe_data_dict_length_{self.length}.pkl"
-```
-Or if path and dscr are left to None:
-```jupyterpython 
-f"./writhe_data_dict_length_{self.length}.pkl"
-```
 
 
 The class also has plotting methods with many options

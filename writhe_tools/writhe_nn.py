@@ -65,13 +65,14 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor):
     dots = (dx[:, :, [0, 0, 0, 1, 1, 2]] * dx[:, :, [1, 2, 3, 2, 3, 3]]).sum(-1)
 
     # get indices; dots is ordered according to indices of 3,3 upper right triangle
+    # NOTE : we compute dots first because we use each twice
     u, v, h = [0, 4, 5, 1], \
               [4, 5, 1, 0], \
               [2, 3, 2, 3]
 
     # surface area from scalars
     theta = ((dots[:, :, u] * dots[:, :, v] - dots[:, :, h])
-             / torch.sqrt(((1 - dots[:, :, u] ** 2) * (1 - dots[:, :, v] ** 2)).abs().clip(1e-10))
+             / ((1 - dots[:, :, u] ** 2) * (1 - dots[:, :, v] ** 2)).abs().clip(1e-10).sqrt()
              ).clip(-1, 1).arcsin().sum(-1)
 
     # signs from triple products
@@ -173,8 +174,10 @@ class WritheMessage(nn.Module):
         # derive attention weights from distances
         # if no distances computed, compute them
         weights = (getattr(x, self.distance_attr)[self.distance_indices]
-                   if hasattr(x, self.distance_attr or "_NONE")
-                   else (x.x[src_node] - x.x[dst_node]).norm(dim=-1)).pow(2).neg().exp()
+                   if hasattr(x, self.distance_attr or "_NONE_")
+                   else (x.x[src_node] - x.x[dst_node]).norm(dim=-1)
+                   ).pow(2).neg().exp()
+
         # get attention weights, softmax normalize, scatter
         attention = (weights / scatter(weights, dst_node)[dst_node]).unsqueeze(-1)
         message = scatter(writhe * attention, dst_node, dim=0)
