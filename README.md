@@ -56,7 +56,6 @@ Here, we use MDTraj to load the trajectory.
 
 ```jupyterpython
 import mdtraj as md 
-atom_indices = 
 xyz = md.load("example.xtc", top="example.pdb",
               atom_indices=md.load("example.pdb").top.select("name = CA")
               ).center_coordinates().xyz
