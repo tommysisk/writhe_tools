@@ -88,7 +88,8 @@ writhe.save(path=None, dscr=None)
 restored_writhe = Writhe.load("./writhe_data_dict_length_1.pkl")
 ```
 
-The results are saved as a pickled python dictionary with a pre-defined name:
+The results are saved as a pickled python dictionary with a template name
+that can be modified using the **path** and **dscr** (description) arguments of the *save* function:
 ```jupyterpython
 f"{path}/{dscr}_writhe_data_dict_length_{self.length}.pkl"
 ```
@@ -98,7 +99,7 @@ f"./writhe_data_dict_length_{self.length}.pkl"
 ```
  The *compute_writhe* method has many options. Here's an example with descriptions of all the arguments.
  Only the argument defining the segment length, **length**, is required. Note that calculation can be performed 
-on multiple (multi_proc=True) CPU or GPU (cuda=True) devices. If using GPUs, it is best to avoid interactive kernels like jupyter notebooks due 
+on multiple (**multi_proc**=True) CPU or GPU (**cuda**=True) devices. If using GPUs, it is best to avoid interactive kernels like jupyter notebooks due 
 to known issues with clearing GPU memory and to manually set cuda_batch_size to avoid out of memory errors. 
 
 ```jupyterpython
@@ -115,13 +116,6 @@ results = writhe.compute_writhe(
           multi_proc=True  # Default: Use multi-processing
         )
 ```
-The class method, *compute_writhe* is defined so that any set of coordinates (**xyz**, **n_points**)
-can be dropped in to the calculation.
-However, leaving the argument as default
-will use the coordinates (xyz) the class was instantiated with. 
-
-
-Below we show how to compute the writhe, save the results and restore the class from the saved results.
 
 - NOTES:
   - The *compute_writhe* method returns a dictionary of the results. If store_result=True, there's no need to assign a variable to the return.
