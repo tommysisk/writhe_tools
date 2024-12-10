@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 import numpy as np
 import time
+import timeit
 import torch
+from functools import partial
 
 
 def to_numpy(x: "digit or iterable"):
@@ -56,6 +58,24 @@ class Timer:
             return False
 
         return False
+
+    @classmethod
+    def execution_time(cls, function: callable, n: int=1000, args: dict = None ):
+        """
+        Execute a function n times and compute the average and standard deviation of the
+        execution time.
+
+        Args:
+            function : (callable) The function to be executed
+            n : (int, optional) The nuber of times to execute the function
+            args : (dict, optional) The arguments that should be passed to the funciton,  if applicable
+        """
+
+        function = partial(function, **args) if args is not None else function
+
+        execution_times = timeit.repeat(function, repeat=n, number=1)
+
+        return np.mean(execution_times), np.std(execution_times)
 
 
 def make_symbols():

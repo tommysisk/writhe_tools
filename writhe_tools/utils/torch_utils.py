@@ -27,7 +27,7 @@ def catch_cuda_oom(func):
     return wrapper
 
 
-def profile_function(algorithm, *args, track_gpu=False, device=None):
+def profile_function(algorithm, args:dict, track_gpu=True, device=0):
     """
     Function to profile execution time and GPU memory usage for functions with PyTorch tensors.
 
@@ -40,7 +40,7 @@ def profile_function(algorithm, *args, track_gpu=False, device=None):
 
     # Time execution
     start_time = time.time()
-    result = algorithm(*args)  # Execute the function
+    result = algorithm(**args)  # Execute the function
     end_time = time.time()
 
     # Track GPU memory after execution (if using GPU)

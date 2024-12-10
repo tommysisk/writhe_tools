@@ -64,8 +64,8 @@ def box_plot(values: np.ndarray,
     ax.set_ylabel(ylabel, size=6 * font_scale)
     ax.set_title(title, size=6 * font_scale)
 
-    if all(i is not None for i in (ymin, ymax)):
-        ax.set_ylim(ymin, ymax)
+    #if all(i is not None for i in (ymin, ymax)):
+    ax.set_ylim(bottom=ymin, top=ymax)
 
     ax.tick_params("both", labelsize=6 * font_scale)
     ax.tick_params("x", labelrotation=rotation)

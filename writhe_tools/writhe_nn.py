@@ -2,20 +2,150 @@ import torch
 import torch.nn as nn
 from torch_scatter import scatter
 import math
+from typing import Optional
 from .utils.indexing import get_segments, flat_index
 
 
 @torch.jit.script
-def nnorm(x: torch.Tensor):
+def divnorm(x: torch.Tensor):
     """Convenience function for (batched) normalization of vectors stored in arrays with last dimension 3"""
     return x / torch.linalg.norm(x, dim=-1, keepdim=True)
 
 
 @torch.jit.script
-def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor):
+def writhe_segments_cross(xyz: torch.Tensor, segments: torch.Tensor,):
+
+    """
+    Compute the writhe (signed crossing) of 2 segment pairs for NSegments and all frames (index 0) in xyz
+     (xyz can contain just one frame).
+
+     This computation uses cross products, which are the most precise for small angles.
+
+    Args:
+        segments:  tensor of shape (Nsegments, 4) giving the indices of the 4 alpha carbons in xyz creating 2 segments:::
+                 tensor(Nframes, [seg1_start_point,seg1_end_point,seg2_start_point,seg2_end_point]).
+                 We have the flexability for segments to simply be one dimensional if only one value of writhe is to be computed.
+
+        xyz: array of shape (Nframes, N_alpha_carbons, 3),coordinate array giving the positions of ALL the alpha carbons
+
+    """
+
+    # ensure correct shape for segment for lazy arguments
+    assert segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
+    segments, xyz = segments.unsqueeze(0) if segments.ndim < 2 else segments, \
+                    xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
+
+    dx = divnorm((-xyz[:, segments[:, :2], None]
+                  + xyz[:, segments[:, None, 2:]]
+                  ).reshape(-1, len(segments), 4, 3))
+
+    crosses = divnorm(torch.cross(dx[:, :, [0, 1, 3, 2]],
+                                  dx[:, :, [1, 3, 2, 0]],
+                                  dim=-1))
+
+    # this will be the sum of the angles or surface area element,
+    # we reassign the crosses variable to clear memory
+    crosses = (crosses[:, :, [0, 1, 2, 3]]
+               * crosses[:, :, [1, 2, 3, 0]]
+               ).sum(-1).clip(-1, 1).arcsin().sum(2)
+
+    signs = (torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
+                         xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
+                         dim=-1) * dx[:, :, 0]).sum(-1).sign()
+
+    return torch.squeeze(crosses * signs) / (2 * torch.pi)
+
+
+@torch.jit.script
+def writhe_segments_cross_index(xyz: torch.Tensor,
+                                segments: torch.Tensor,
+                                dx: Optional[torch.Tensor] = None,
+                                dx_index: Optional[torch.Tensor] = None):
+
+    """
+    Compute the writhe (signed crossing) of 2 segment pairs for NSegments and all frames (index 0) in xyz
+     (xyz can contain just one frame)
+
+    This computation uses cross products, which are the most precise for small angles.
+
+
+    Args:
+        segments:  tensor of shape (Nsegments, 4) giving the indices of the 4 alpha carbons in xyz creating 2 segments:::
+                 tensor(Nframes, [seg1_start_point,seg1_end_point,seg2_start_point,seg2_end_point]).
+                 We have the flexability for segments to simply be one dimensional if only one value of writhe is to be computed.
+
+        xyz: tensor of shape (Nframes, N_alpha_carbons, 3),coordinate array giving the positions of ALL the alpha carbons
+
+
+        We provide a way to use precomputed vectors when they're available with the caveat that the direction
+        of displacements and the construction of the correct indices must follow the same conventions as if they
+        were computed on the fly. This is considerably convoluted, so there's almost never a reason to use these arguments
+        outside the context where graph objects containing the displacement vectors are already available.
+
+        WARNING : precomputing and implementing fancy indexing may not increase speed due to resolution of addresses,
+                  scattered reads, and non-contiguous sections of precomuted tensors being accessed in a single slice.
+
+
+        dx : tensor of shape (***, 3), displacement vectors between C-alpha atoms.
+         The exact form depends on dx_indices (if applicable, see WritheMessage class for a use-case)
+
+        dx_index : tensor of shape (Nsegments, 6).
+         The indices of the 6 displacement vectors in dx used to compute the writhe of 1 crossing.
+    """
+
+    # ensure correct shape for segment for lazy arguments
+    assert segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
+    segments, xyz = segments.unsqueeze(0) if segments.ndim < 2 else segments, \
+                    xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
+
+    if dx is None or dx_index is None:
+        # providing just one introduces ambiguity that can lead to unexpected results,
+        # because the directions should be consistent, i.e, from i to j or i to j but not both (sign flips)
+        tri = torch.triu_indices(xyz.shape[1], xyz.shape[1], offset=1)
+        # always point towards the larger index
+        dx = divnorm(xyz[:, tri[1]] - xyz[:, tri[0]]) if dx is None else dx
+        # compute the writhe directly from these vectors
+        dx_index = torch.stack([flat_index(segments[:, i],
+                                           segments[:, j],
+                                           n=xyz.shape[1],
+                                           d0=1,
+                                           triu=True)
+                                for i, j in zip((0, 0, 0, 1, 1, 2),
+                                                (1, 2, 3, 2, 3, 3))], 1).long()
+
+    dx = dx.unsqueeze(0) if dx.ndim < 3 else dx
+
+    crosses = divnorm(torch.cross(dx[:, dx_index[:, [1, 2, 4, 3]]],
+                                  dx[:, dx_index[:, [2, 4, 3, 1]]],
+                                  dim=-1)
+                      )
+    # gets crosses out of memory, this is actually the sum of the angles - 2 * pi
+    crosses = (crosses[:, :, [0, 1, 2, 3]]
+               * crosses[:, :, [1, 2, 3, 0]]
+               ).sum(-1).clip(-1, 1).arcsin().sum(2)
+
+    signs = (torch.cross(dx[:, dx_index[:, 5]],
+                         dx[:, dx_index[:, 0]],
+                         dim=-1) * dx[:, dx_index[:, 1]]).sum(-1).sign()
+
+    return torch.squeeze(crosses * signs) / (2 * torch.pi)
+
+
+@torch.jit.script
+def writhe_segments_dot(xyz: torch.Tensor,
+                        segments: torch.Tensor,
+                        double: bool = False):
     """
     Compute the writhe (signed crossing) of 2 segment pairs for NSegments and all frames (index 0) in xyz
     (xyz can contain just one frame).
+
+    This computation trades speed for precision. In cases where very small angles are encountered,
+    this approach has more error than the methods using cross products. However,
+    it's worth noting that this formulation is analytically correct and that the issues with precision
+    stem from computing magnitudes of cross products and determinants with the gram determinant
+    rather than scalar triple products.
+
+    When using double precision, this approach gives results that are agree with the cross product method up to ~ 1e-5
 
     **Arguments**:
     - segments: Array of shape (Nsegments, 4) giving the indices of the 4 alpha carbons in xyz creating 2 segments:
@@ -23,7 +153,9 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor):
       Segments can be one-dimensional if only one value of writhe is to be computed.
     - xyz: Array of shape (Nframes, N_alpha_carbons, 3), coordinate array giving the positions of all alpha carbons.
 
-    The program uses complex indexing to minimize the number of required computations.
+    The program uses dot products and trigonometric identities to refactor the computation, making it
+    ~twice as fast as the cross product formulation.
+
     It makes use of the following identities :
 
     Assume that a, b, c, d are normalized vectors in R^3:
@@ -53,13 +185,15 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor):
     """
     # ensure shape for segments
     assert segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
+    dtype = xyz.dtype
     # catch any lazy arguments
     segments, xyz = segments.unsqueeze(0) if segments.ndim < 2 else segments, \
-                      xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
+                     xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
+    xyz = xyz.double() if double else xyz
 
     # displacement vectors between end points
-    dx = nnorm((-xyz[:, segments[:, :2], None] + xyz[:, segments[:, None, 2:]]
-                ).reshape(-1, len(segments), 4, 3))
+    dx = divnorm((-xyz[:, segments[:, :2], None] + xyz[:, segments[:, None, 2:]]
+                 ).reshape(-1, len(segments), 4, 3))
 
     # compute all dot products, then work with scalars
     dots = (dx[:, :, [0, 0, 0, 1, 1, 2]] * dx[:, :, [1, 2, 3, 2, 3, 3]]).sum(-1)
@@ -71,16 +205,120 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor):
               [2, 3, 2, 3]
 
     # surface area from scalars
-    theta = ((dots[:, :, u] * dots[:, :, v] - dots[:, :, h])
-             / ((1 - dots[:, :, u] ** 2) * (1 - dots[:, :, v] ** 2)).abs().clip(1e-10).sqrt()
+    dots = ((dots[:, :, u] * dots[:, :, v] - dots[:, :, h])
+
+             / ((1 - dots[:, :, u] ** 2) * (1 - dots[:, :, v] ** 2)).clamp(min=1e-15).sqrt()
+
              ).clip(-1, 1).arcsin().sum(-1)
 
     # signs from triple products
-    signs = (dx[:, :, 0] * torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
-                                       xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]], dim=-1)
-             ).sum(-1).sign()
+    signs = (torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
+                         xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
+                         dim=-1) * dx[:, :, 0]).sum(-1).sign()
 
-    return torch.squeeze(theta * signs) / (2 * torch.pi)
+    return torch.squeeze(dots * signs).to(dtype) / (2 * torch.pi)
+
+@torch.jit.script
+def writhe_segments_dot_index(xyz: torch.Tensor,
+                              segments: torch.Tensor,
+                              dx: Optional[torch.Tensor] = None,
+                              dx_index: Optional[torch.Tensor] = None,
+                              double: bool = False):
+    """
+    Compute the writhe (signed crossing) of 2 segment pairs for NSegments and all frames (index 0) in xyz
+    (xyz can contain just one frame).
+
+    This computation trades speed for precision. In cases where very small angles are encountered,
+    this approach has more error than the methods using cross products. However,
+    it's worth noting that this formulation is analytically correct and that the issues with precision
+    stem from computing magnitudes of cross products and determinants with the gram determinant
+    rather than scalar triple products.
+
+    When using double precision, this approach gives results that are agree with the cross product method up to ~ 1e-5
+
+    **Arguments**:
+    - segments: Array of shape (Nsegments, 4) giving the indices of the 4 alpha carbons in xyz creating 2 segments:
+      array(Nframes, [seg1_start_point, seg1_end_point, seg2_start_point, seg2_end_point]).
+      Segments can be one-dimensional if only one value of writhe is to be computed.
+    - xyz: Array of shape (Nframes, N_alpha_carbons, 3), coordinate array giving the positions of all alpha carbons.
+
+    The program uses dot products and trigonometric identities to refactor the computation, making it
+    ~twice as fast as the cross product formulation.
+
+    It makes use of the following identities :
+
+    Assume that a, b, c, d are normalized vectors in R^3:
+
+         a.cross(b) · c.cross(d)  /  ||a.cross(b)|| * ||c.cross(d)||
+
+
+        = [(a · c) * (b · d) - (a · d) * (b · c)] / sqrt( (1 - (a · b)**2) * (1 - (c · d)**2) )
+
+    In the special case where b == c:
+
+        = [(a · b) * (b · d) - (a · d) * ||b||**2 ] / sqrt( (1 - (a · b)**2) * (1 - (b · d)**2) )
+
+    Note that ||·||**2 == 1.
+
+    Set
+    u = (a · b),
+    v = (b · d),
+    h = (a · d)
+    and define the scalar function:
+
+       sin(theta - pi / 2) = (u * v - h) / sqrt( (1 - u**2) * (1 - v**2) )
+
+    Precomputing dot products and recursive application of this formula to compute the
+    interior angles of the spherical quadrilateral allows computation of the writhe
+    with 6 dot products and a determinant per crossing.
+    """
+    # ensure shape for segments
+    assert segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
+    dtype = xyz.dtype
+    # catch any lazy arguments
+    segments, xyz = segments.unsqueeze(0) if segments.ndim < 2 else segments, \
+                     xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
+    xyz = xyz.double() if double else xyz
+
+    if dx is None or dx_index is None:
+        # providing just one introduces ambiguity that can lead to unexpected results,
+        # because the directions should be consistent, i.e, from i to j or i to j but not both (sign flips)
+        tri = torch.triu_indices(xyz.shape[1], xyz.shape[1], offset=1)
+        # always point towards the larger index
+        dx = divnorm(xyz[:, tri[1]] - xyz[:, tri[0]]) if dx is None else dx
+        # compute the writhe directly from these vectors
+        dx_index = torch.stack([flat_index(segments[:, i],
+                                           segments[:, j],
+                                           n=xyz.shape[1],
+                                           d0=1,
+                                           triu=True)
+                                for i, j in zip((0, 0, 0, 1, 1, 2),
+                                                (1, 2, 3, 2, 3, 3))], 1).long()
+
+    dx = dx.unsqueeze(0) if dx.ndim < 3 else dx
+
+    # compute all dot products, then work with scalars
+    dots = (dx[:, dx_index[:, [1, 1, 1, 2, 2, 3]]] * dx[:, dx_index[:, [2, 3, 4, 3, 4, 4]]]).sum(-1)
+
+    # get indices; dots is ordered according to indices of 3,3 upper right triangle
+    # NOTE : we compute dots first because we use each twice
+    u, v, h = [0, 4, 5, 1], \
+              [4, 5, 1, 0], \
+              [2, 3, 2, 3]
+
+    # surface area from scalars
+    dots = ((dots[:, :, u] * dots[:, :, v] - dots[:, :, h])
+
+             / ((1 - dots[:, :, u] ** 2) * (1 - dots[:, :, v] ** 2)).clamp(min=1e-15).sqrt()
+
+             ).clip(-1, 1).arcsin().sum(-1)
+
+    # signs from triple products
+    signs = (torch.cross(dx[:, dx_index[:, 5]],
+                         dx[:, dx_index[:, 0]],
+                         dim=-1) * dx[:, dx_index[:, 1]]).sum(-1).sign()
+
+    return torch.squeeze(dots * signs).to(dtype) / (2 * torch.pi)
 
 
 class WritheMessage(nn.Module):
@@ -95,6 +333,7 @@ class WritheMessage(nn.Module):
                  bins: int = 250,
                  node_attr: str = "invariant_node_features",
                  distance_attr: str = "edge_dist",
+                 dir_attr: str = "edge_dir",
                  segment_length: int = 1,
                  gaussian_bins: bool = False,
                  bin_low: float = -1,
@@ -108,9 +347,10 @@ class WritheMessage(nn.Module):
 
         # prerequisit information
         segments = get_segments(n_atoms, length=segment_length, tensor=True)
+        # need edges based on the segments the writhe is computed from
         edges = torch.cat([segments[:, [0, 2]], segments[:, [1, 3]]]).T
-        # edges = torch.cat([edges, torch.flip(edges, (0,))], dim=1) # this doesn't help
 
+        # edges = torch.cat([edges, torch.flip(edges, (0,))], dim=1) # this doesn't help
         if distance_attr is not None:
             # if a batch already contains all the pairwise Euclidian distances,
             # fetch them on the fly using flattened indices
@@ -123,6 +363,25 @@ class WritheMessage(nn.Module):
             #                      distance_indices)
             # self.register_buffer("distance_indices",
             #                      torch.cat([i * increment + dist_index for i in range(batch_size)]))
+        if dir_attr is not None:
+            dx_index = torch.stack([flat_index(segments[:, i],
+                                               segments[:, j],
+                                               n=n_atoms,
+                                               d0=1,
+                                               triu=False)
+                                    for i, j in zip((0, 0, 0, 1, 1, 2),
+                                                    (1, 2, 3, 2, 3, 3))], 1).long()
+            # retrieve the needed displacement vectors
+            # in the graph object (if they're there)
+            self.register_buffer("dir_indices",
+                                 (dx_index.repeat(batch_size, 1, 1)
+                                  + int(n_atoms ** 2 - n_atoms)
+                                  * torch.arange(batch_size).reshape(-1, 1, 1)
+                                  ).flatten(0, 1)
+                                 )
+            #self.register_buffer("dir_signs")
+            # the writhe has to be computed with a fixed sign convention
+            # signs
 
         self.register_buffer("edges",
                              torch.cat([i * n_atoms + edges for i in range(batch_size)], axis=1).long())
@@ -132,7 +391,8 @@ class WritheMessage(nn.Module):
         self.register_buffer("segment_length", torch.LongTensor([segment_length]))
 
         self.node_attr = node_attr
-        self.distance_attr = distance_attr or "NONE"
+        self.distance_attr = distance_attr
+        self.dir_attr = dir_attr
         self.n_features = n_features
         self.residual = residual
         self.bin_low = bin_low
@@ -151,7 +411,8 @@ class WritheMessage(nn.Module):
 
         self.register_parameter("basis",
                                 torch.nn.Parameter(
-                                    torch.Tensor(1, 1, bins, n_features).uniform_(-std, std),  # normal_(0, std)
+                                    torch.Tensor(1, 1, bins, n_features
+                                                 ).uniform_(-std, std),  # normal_(0, std)
                                     requires_grad=True)
                                 )
 
@@ -163,18 +424,30 @@ class WritheMessage(nn.Module):
         return (self.soft_one_hot(wr).unsqueeze(-1) * self.basis).sum(-2)
 
     def compute_writhe(self, x):
-        return self.embed_writhe(writhe_segments(xyz=x.x.reshape(-1, self.n_atoms, 3),
-                                                 segments=self.segments)
-                                 ).repeat(1, 2, 1).reshape(-1, self.n_features)
+        if hasattr(x, str(self.dir_attr)):
+            i, j = (i.flatten() for i in x.edge_index)
+            # the writhe computation requires a fixed direction for displacement vectors,
+            # i.e. i -> j or j -> i but not both as the same computation will give opposite signs
+            dx, dx_index = divnorm(x[self.dir_attr] * (i - j).sign().reshape(-1, 1)), self.dir_indices
+        else:
+            dx, dx_index = None, None
+
+        return self.embed_writhe(
+            writhe_segments_cross_index(
+                xyz=x.x.reshape(-1, self.n_atoms, 3),
+                segments=self.segments,
+                dx=dx,
+                dx_index=dx_index
+               )).repeat(1, 2, 1).reshape(-1, self.n_features)
 
     def forward(self, x, update=True):
 
         src_node, dst_node = (i.flatten() for i in self.edges)
         writhe = self.compute_writhe(x)
-        # derive attention weights from distances
+        # derive attention weights from distances - unrelated to calculation of the writhe from coordinates
         # if no distances computed, compute them
         weights = (getattr(x, self.distance_attr)[self.distance_indices]
-                   if hasattr(x, self.distance_attr or "_NONE_")
+                   if hasattr(x, str(self.distance_attr))
                    else (x.x[src_node] - x.x[dst_node]).norm(dim=-1)
                    ).pow(2).neg().exp()
 
@@ -273,6 +546,11 @@ def gaussian_binning(low: float,
     final_bin_edges = torch.sort(full_bin_edges)[0]
 
     return final_bin_edges[1:]
+
+
+# cross product method to compute the writhe (Klenin 2000)
+
+
 
 
 # class WritheMessage(nn.Module):

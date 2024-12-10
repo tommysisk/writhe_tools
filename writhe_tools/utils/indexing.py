@@ -3,9 +3,11 @@
 import numpy as np
 import torch
 import itertools
+from math import floor
 from numpy_indexed import group_by as group_by_
 import functools
 from .misc import to_numpy
+from typing import Optional, Union
 
 
 def split_list(lst, n):
@@ -51,11 +53,20 @@ def sort_indices_list(indices_list: list,
     return list(map(sort, indices_list))
 
 
-def flat_index(i: "row idx",
-               j: "column idx",
-               n: "rows",
-               m: "cols" = None,
-               d0: "degree of diag before flattening" = 0,
+def integrate_naturals(a: torch.Tensor,
+                       b: torch.Tensor):
+    """
+    Sum up natural numbers from b to a with both a and b included in the sum
+    (boundaries are inclusive on both sides)
+    """
+    return (a + b) * (b + 1 - a) // 2
+
+
+def flat_index(i: torch.Tensor,
+               j: torch.Tensor,
+               n: int,
+               m: int = -1,
+               d0: int = 0,
                triu: bool = False,
                ):
     """
@@ -68,13 +79,18 @@ def flat_index(i: "row idx",
 
     if the flattened matrix was upper triangular, use triu argument"""
 
-    if m is None:
-        m = n
+    m = n if m == -1 else m
     if triu:
-        tri = i + d0
-        return i * m + j - (tri ** 2 + tri) / 2
+        # more obvious way of writting the subtraction part
+        #    (sum of all naturals up to i + d0) - (sum of all the naturals up to, d0 - 1)
+        #    thus, this is the sum of all naturals from d0 to i ...
+        #    tri = (i + d0)
+        #   (tri ** 2 + tri) // 2 - (d0 ** 2 - d0) // 2
+        #
+        return i * m + j - torch.floor_divide((2 * d0 + i) * (i + 1), 2)
     else:
-        return i * m + j - (i + 1) * d0
+        assert d0 == 1, "This function only works for d0=1 when triu=False, currently"
+        return i * m + j - torch.floor_divide(i * (m - 1) + j,  m).clamp(d0)
 
 
 def triu_flat_indices(n: int, d0: int, d1: int = None):
@@ -131,7 +147,8 @@ def group_by(keys: np.ndarray,
     """
     if reduction is not None:
         values = np.ones_like(keys) / len(keys) if values is None else values.squeeze()
-        return np.stack([i[-1] for i in group_by_(keys=keys, values=values, reduction=reduction)]) if values.ndim > 1 \
+        return np.stack([i[-1] for i in group_by_(keys=keys, values=values, reduction=reduction)]) \
+            if values.ndim > 1 \
             else np.asarray(group_by_(keys=keys, values=values, reduction=reduction))[:, -1]
     else:
         values = np.arange(len(keys)) if values is None else values
@@ -178,6 +195,43 @@ def get_segments(n: int = None,
             segments = combinations(shifted_pairs(index0, length)).reshape(-1, 4)
             segments = segments[~(segments[:, 1] == segments[:, 2])]
             return torch.from_numpy(segments).long() if tensor else segments
+
+
+def dx_indices_from_segments(segments: torch.LongTensor,
+                             n: int,
+                             d0: int,
+                             triu: bool,
+                             n_batches: int=1):
+
+    """
+    Get the indices of the 4 displacement vectors
+    needed to compute the writhe of each segment pair (first dim of segments).
+    Output will be LongTensor with same dimension as segments.
+
+    Args:
+        segments:  (torch.LongTensor)
+        n: (int)
+        d0: (int)
+        triu: (bool)
+
+    """
+
+    indices = torch.stack([flat_index(segments[:, i],
+                            segments[:, j],
+                            n=n,
+                            d0=d0,
+                            triu=triu)
+                 for i, j in zip((0, 0, 0, 1, 1, 2),
+                                 (1, 2, 3, 2, 3, 3))], 1).long()
+    if n_batches == 1:
+        return indices
+
+    else:
+        offset = n**2 if triu is False and d0 == 0\
+                 else (flat_index((n-1)-d0, (n-1), n=n, d0=d0, triu=True) + 1
+                 * (2 if not triu else 1))
+        pass
+
 
 
 def contiguous_bool(data: np.ndarray = None,

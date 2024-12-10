@@ -19,7 +19,7 @@ from typing import Optional, Union, Tuple, List
 
 from .utils.indexing import split_list, get_segments
 from .utils.torch_utils import estimate_segment_batch_size, catch_cuda_oom
-from .writhe_nn import writhe_segments
+from .writhe_nn import writhe_segments_cross
 from .utils.filing import save_dict, load_dict
 from .utils.misc import to_numpy, Timer
 from .stats import window_average
@@ -42,7 +42,7 @@ matplotlib.text._log.addFilter(MplFilter())
 # this computation is written specifically for ray and should not be used otherwise
 
 
-def nnorm(x):
+def divnorm(x):
     return x / np.linalg.norm(x, axis=-1, keepdims=True)
 
 
@@ -62,7 +62,7 @@ def writhe_segment(segment=None, xyz=None):
     xyz = xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
     # broadcasting trick
     # negative sign, None placement and order are intentional, don't change without testing equivalent option
-    dx = nnorm((-xyz[:, segment[:2], None] + xyz[:, segment[None, 2:]]).reshape(-1, 4, 3))
+    dx = divnorm((-xyz[:, segment[:2], None] + xyz[:, segment[None, 2:]]).reshape(-1, 4, 3))
 
     # for the following, array broadcasting is (surprisingly) slower than list comprehensions
     # when using ray!! (without ray, broadcasting is faster).
@@ -118,8 +118,8 @@ def writhe_batches_cuda(xyz: torch.Tensor,
                         segments: torch.LongTensor,
                         device: int = 0):
     xyz = xyz.to(device)
-    result = torch.cat([writhe_segments(xyz, i).cpu() for i in segments], axis=-1).numpy() \
-        if isinstance(segments, (list, tuple)) else writhe_segments(xyz=xyz, segments=segments).cpu().numpy()
+    result = torch.cat([writhe_segments_cross(xyz, i).cpu() for i in segments], axis=-1).numpy() \
+        if isinstance(segments, (list, tuple)) else writhe_segments_cross(xyz=xyz, segments=segments).cpu().numpy()
     del xyz
     torch.cuda.empty_cache()
     return result
@@ -133,6 +133,7 @@ def calc_writhe_parallel_cuda(xyz: torch.Tensor,
                               segments: torch.LongTensor,
                               batch_size: int = None,
                               multi_proc: bool = True) -> np.ndarray:
+
     batch_size = estimate_segment_batch_size(len(xyz)) if batch_size is None else batch_size
 
     if batch_size > len(segments):
@@ -241,7 +242,7 @@ class Writhe:
                 warnings.warn("You are not using any multiprocessing! "
                               "Multiprocessing on CPU is managed by ray"
                               "and avoids issues with memory overflow.")
-                return writhe_segments(segments=torch.from_numpy(segments).long(),
+                return writhe_segments_cross(segments=torch.from_numpy(segments).long(),
                                        xyz=torch.from_numpy(xyz)).numpy()
 
     def compute_writhe(self,
