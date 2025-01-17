@@ -80,6 +80,7 @@ def get_available_cuda_memory(device: int = 0):
 
 
 def estimate_segment_batch_size(n_samples: int):
+
     return int((700 * 29977 * get_available_cuda_memory()) / (7.79229736328125 * n_samples))
 
 

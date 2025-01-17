@@ -22,7 +22,7 @@ from .utils.torch_utils import estimate_segment_batch_size, catch_cuda_oom
 from .writhe_nn import writhe_segments_cross
 from .utils.filing import save_dict, load_dict
 from .utils.misc import to_numpy, Timer
-from .stats import window_average
+from .stats import window_average, mean
 
 
 
@@ -153,6 +153,7 @@ def calc_writhe_parallel_cuda(xyz: torch.Tensor,
 
 
 def to_writhe_matrix(writhe_features, n_points, length):
+    writhe_features = np.expand_dims(writhe_features, 0)
     n = len(writhe_features)
     writhe_matrix = np.zeros([n] + [n_points - length] * 2)
 
@@ -404,7 +405,9 @@ class Writhe:
                            label_stride: int = 5,
                            dscr: Optional[str] = None,
                            font_scale: float = 1,
-                           ax: Optional[plt.Axes] = None) -> None:
+                           cmap: Optional[str] = None,
+                           ax: Optional[plt.Axes] = None,
+                           weights: Optional[np.ndarray] = None) -> None:
         """
         Plots the writhe matrix for visualizing writhe values in topological frames.
 
@@ -422,6 +425,7 @@ class Writhe:
             label_stride (int, optional): Interval to reduce tick labels for visualization. Defaults to 5.
             dscr (Optional[str], optional): Description for the subset of frames averaged, if applicable. Defaults to None.
             font_scale (float, optional): Scale factor for font sizes. Defaults to 1.
+            cmap (Optional[str], optional): Colormap to use in plot, if None defaults to seismic or Reds is abs = True
             ax (Optional[plt.Axes], optional): Matplotlib Axes object to plot on. If None, a new figure is created. Defaults to None.
 
         Returns:
@@ -435,17 +439,17 @@ class Writhe:
 
         args = locals()
 
-        mat = self.matrix()
+        mat = self.writhe_features
 
         if absolute:
             mat = abs(mat)
-            cmap = "Reds"
+            cmap = "Reds" if cmap is None else cmap
             cbar_label = "Absolute Writhe"
             norm = None
 
         # can't define norm until we know if it's a mean or not. if abs, then norm isn't needed
         if (ave and (index is None)):
-            mat = mat.mean(0)
+            mat = mean(mat, weights=weights)
             title = "Average Writhe Matrix"
         else:
             assert index is not None, "If not plotting average, must specify index to plot"
@@ -454,7 +458,7 @@ class Writhe:
                 mat = mat[index.item()]
                 title = f"Writhe Matrix: Frame {index.item()}"
             else:
-                mat = mat[index].mean(0)
+                mat = mean(mat[index], weights)
                 if dscr is None:
                     warnings.warn(("Taking the average over a subset of indices."
                                    "The option, 'dscr', (type:str) should be set to provide"
@@ -468,13 +472,13 @@ class Writhe:
         if not absolute:
             vmax = abs(mat).max()
             norm = matplotlib.colors.TwoSlopeNorm(vcenter=0, vmin=-1 * vmax, vmax=vmax)
-            cmap = "seismic"
+            cmap = "seismic" if cmap is None else cmap
             cbar_label = "Writhe"
 
         if ax is None:
             fig, ax = plt.subplots(1)
 
-        s = ax.imshow(mat.squeeze(), cmap=cmap, norm=norm)
+        s = ax.imshow(self.matrix(writhe_features=mat).squeeze(), cmap=cmap, norm=norm)
 
         cbar = plt.colorbar(s, ax=ax, fraction=0.046, pad=0.04)
         cbar.set_label(cbar_label, fontsize=10 * font_scale, labelpad=2 + np.exp(font_scale))

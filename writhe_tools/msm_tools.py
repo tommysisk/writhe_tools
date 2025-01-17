@@ -150,8 +150,9 @@ def get_its(mats, tau: int):
 
 def plot_its(estimate: np.ndarray, estimate_error=None, n_its: int = None,
              lag: int = 1, dt: float = .2, unit="ns", cmap: str = "jet",
-             fig_width=10, fig_length=6, title: str = "Implied Timescales",
-             ax=None, plot_text_scale: float = 5, yscale="log"):
+             color_list: list = None,fig_width=10, fig_length=6,
+             title: str = "Implied Timescales", ax=None,
+             font_scale: float = 5, yscale="log"):
 
     """estimate: eigen vals estimated at integer multiples of the lag time
     predict: eigen vals of the initial lagtime propagated via exponentiation"""
@@ -164,7 +165,8 @@ def plot_its(estimate: np.ndarray, estimate_error=None, n_its: int = None,
     color_list = get_color_list(n_colors=n_its,
                                 cmap=cmap,
                                 trunc=50,
-                                pre_trunc=40)
+                                pre_trunc=40) \
+                  if color_list is None else color_list
 
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_length))
@@ -176,7 +178,6 @@ def plot_its(estimate: np.ndarray, estimate_error=None, n_its: int = None,
                                   range(n_its)):
         ax.plot(lag_dt, est_proc, label="Estimate", color=color)
         ax.scatter(lag_dt, est_proc, color=color)
-
     if estimate_error is not None:
         for est_error, color, _ in zip([estimate_error[:, i] for i in range(estimate_error.shape[1])],
                                        color_list,
@@ -191,10 +192,10 @@ def plot_its(estimate: np.ndarray, estimate_error=None, n_its: int = None,
     ax.plot(lag_dt, lag_dt, color="black")
     ax.fill_between(lag_dt, lag_dt, color="gray", alpha=.5)
     if yscale is not None: ax.set_yscale(yscale)
-    ax.set_ylabel(f"ITS ({unit})", size=5 * plot_text_scale)
-    ax.set_xlabel(rf"Lag time, $\tau$ ({unit})", size=5 * plot_text_scale)
-    ax.tick_params(axis="both", labelsize=5 * plot_text_scale)
-    ax.set_title(label=title, size=6 * plot_text_scale)
+    ax.set_ylabel(f"ITS ({unit})", size=5 * font_scale)
+    ax.set_xlabel(rf"Lag time, $\tau$ ({unit})", size=5 * font_scale)
+    ax.tick_params(axis="both", labelsize=5 * font_scale)
+    ax.set_title(label=title, size=6 * font_scale)
 
     return
 
@@ -202,6 +203,7 @@ def plot_its(estimate: np.ndarray, estimate_error=None, n_its: int = None,
 def plot_cktest(predict: np.ndarray, estimate: np.ndarray,
                 lag: int, dt: float, unit: str = "ns",
                 predict_color: str = "red", estimate_color: str = "black",
+                predict_fill_alpha=.4, estimate_fill_alpha=.4,
                 predict_errors=None, estimate_errors=None,
                 fill_estimate=True, title: str = None):
     """predict+errors should be of shape [2,predict/estimate.shape] where the 0th dim is upper and lower
@@ -220,22 +222,23 @@ def plot_cktest(predict: np.ndarray, estimate: np.ndarray,
     # make sure the predictions errors match up if they're provided
 
     if predict_errors is not None:
-        if not predict_errors.shape[1] != len(predict):
+        if predict_errors.shape[1] != len(predict):
             predict_errors = np.concatenate(
                 [np.expand_dims(np.stack([np.eye(predict.shape[1])] * 2), axis=1), predict_errors],
                 axis=1)
 
     # same steps as for predictions
-    if not check_id(estimate[0]):
+    if not check_id(estimate[0]) and len(estimate) != len(predict):
         print("changing est")
         estimate = np.concatenate([np.expand_dims(np.eye(predict.shape[1], predict.shape[1]), axis=0),
                                    estimate])
 
     if estimate_errors is not None:
-        if not estimate_errors.shape[1] != len(estimate):
+        if estimate_errors.shape[1] != len(estimate):
             estimate_errors = np.concatenate(
-                [np.expand_dims(np.stack([np.zeros((predict.shape[1], predict.shape[1]))] * 2), axis=1),
+                [np.expand_dims(np.stack([np.eye( predict.shape[1])] * 2), axis=1),
                  estimate_errors], axis=1)
+    print(estimate_errors.shape)
 
     nsteps, nstates = predict.shape[:2]
     fig, axes = plt.subplots(nstates, nstates, figsize=(15, 15), sharex=True, sharey=True)
@@ -250,23 +253,31 @@ def plot_cktest(predict: np.ndarray, estimate: np.ndarray,
     for i in range(nstates):
         for j in range(nstates):
             if not predict_errors is None:
-                axes[i, j].fill_between(dt_lag, predict_errors[0][:, i, j], predict_errors[1][:, i, j],
-                                        color=predict_color, alpha=0.4)
+                axes[i, j].fill_between(dt_lag, predict_errors[0][:, i, j],
+                                        predict_errors[1][:, i, j],
+                                        color=predict_color,
+                                        alpha=predict_fill_alpha)
 
                 predict_label += "      conf. 95%"
 
-            if not estimate_errors is None:
+            if estimate_errors is not None:
 
                 if fill_estimate:
                     axes[i, j].fill_between(dt_lag[1:],
                                             estimate_errors[0][1:, i, j],
                                             estimate_errors[1][1:, i, j],
-                                            color=estimate_color, alpha=0.4)
+                                            color=estimate_color,
+                                            alpha=estimate_fill_alpha)
                 else:
-                    axes[i, j].errorbar(x=dt_lag,
-                                        y=estimate[:, i, j],
-                                        yerr=abs(estimate_errors[:, :, i, j]),
+                    axes[i, j].errorbar(x=dt_lag, y=estimate[:, i, j],
+                                        yerr=(np.array([-1, 1]).reshape(-1, 1)
+                                             * estimate_errors[:, :, i, j]
+                                             + np.array([1, -1]).reshape(-1, 1)
+                                             * np.stack(2 * [estimate[:, i, j]])
+                                             ),
                                         color=estimate_color, alpha=1)
+
+
                 estimate_label += "      conf. 95%"
 
             axes[i, j].plot(dt_lag, predict[:, i, j], ls="--", color=predict_color, label=predict_label)
@@ -299,7 +310,7 @@ def plot_stat_dist(dist: np.ndarray,
                    cmap: str = "viridis",
                    title: str = "Stationary Distribution",
                    ax=None,
-                   plot_text_scale: float = 5,
+                   font_scale: float = 5,
                    state_label_stride=1):
     # make the stationary distribution and it's error 1D vectors
     # (assuming abs(upper) and abs(lower) errors have been averaged):
@@ -327,10 +338,10 @@ def plot_stat_dist(dist: np.ndarray,
 
     ax.set_xticks(np.arange(1, nstates + 1, state_label_stride))
     ax.set_xticklabels(state_labels[::state_label_stride])
-    ax.set_xlabel("State", size=6 * plot_text_scale)
-    ax.set_ylabel("Staionary Probability", size=6 * plot_text_scale)
-    ax.set_title(title, size=6 * plot_text_scale)
-    ax.tick_params("both", labelsize=6 * plot_text_scale)
+    ax.set_xlabel("State", size=6 * font_scale)
+    ax.set_ylabel("Staionary Probability", size=6 * font_scale)
+    ax.set_title(title, size=6 * font_scale)
+    ax.tick_params("both", labelsize=6 * font_scale)
     ax.set_xlim(.5, nstates + .5)
 
 
@@ -338,13 +349,12 @@ def caps(string: str):
     return ''.join(map(str.capitalize, iter(string)))
 
 
-def mfpt_mat(tmat, dt, lag):
+def mfpt_mat(tmat, dt=1, lag=1, mu=None):
     nstates = tmat.shape[0]
     mfpt = np.zeros((nstates, nstates))
     for i in range(nstates):
-        mfpt[:, i] = deeptime.markov.tools.analysis.mfpt(tmat, i)
-    mfpt = mfpt * (dt * lag)
-    return mfpt
+        mfpt[:, i] = deeptime.markov.tools.analysis.mfpt(tmat, i, mu=mu)
+    return mfpt * dt * lag
 
 
 class MarkovModel:
@@ -419,7 +429,8 @@ class MarkovModel:
         self.hmm["msms"] = list(map(lambda msm: msm.hmm(self.dtraj, n_states), self.msm["msms"]))
 
         # get the resulting discrete trajectories
-        self.hmm["data"]["dtrajs"] = np.stack([hmm.metastable_assignments[self.dtraj]
+        self.hmm["data"]["dtrajs"] = np.stack([hmm.metastable_assignments[self.dtraj if isinstance(self.dtraj, np.ndarray)
+                                                else np.concatenate(self.dtraj)]
                                                for hmm in self.hmm["msms"]])
         # get the transition matrices
         self.hmm["data"]["tmats"] = np.stack([hmm.transition_model.transition_matrix
@@ -446,7 +457,8 @@ class MarkovModel:
         self.pcca.update(dict(data={}))
         self.pcca["msms"] = list(map(lambda msm: msm.pcca(n_states), self.msm["msms"]))
 
-        self.pcca["data"]["dtrajs"] = np.stack([pcca.assignments[self.dtraj]
+        self.pcca["data"]["dtrajs"] = np.stack([pcca.assignments[self.dtraj if isinstance(self.dtraj, np.ndarray)
+                                                else np.concatenate(self.dtraj)]
                                                 for pcca in self.pcca["msms"]])
 
         self.pcca["data"]["tmats"] = np.stack([pcca.coarse_grained_transition_matrix
@@ -481,7 +493,7 @@ class MarkovModel:
             model_type=None,
             cmap: str = "viridis",
             n_its: int = None,
-            plot_text_scale: float = 2,
+            font_scale: float = 2,
             yscale="log",
             ax=None):
 
@@ -494,7 +506,7 @@ class MarkovModel:
                  n_its=n_its,
                  title=f"{caps(model_type)} Implied Timescales",
                  dt=self.dt, lag=self.lag, cmap=cmap,
-                 ax=ax, plot_text_scale=plot_text_scale, yscale=yscale)
+                 ax=ax, font_scale=font_scale, yscale=yscale)
 
     def cktest(self, model_type,
                predict_color: str = "red"):
@@ -520,7 +532,7 @@ class MarkovModel:
                                 model_type: str = "msm",
                                 cmap: str = "viridis",
                                 ax=None,
-                                plot_text_scale: float = 2,
+                                font_scale: float = 2,
                                 state_label_stride=1):
 
         assert len(getattr(self, model_type)) != 0, "Must estimate the chosen model type before plotting"
@@ -532,6 +544,6 @@ class MarkovModel:
         plot_stat_dist(dist=data["stat_dists"][0],
                        title=f"Stationary Distribution {caps(model_type)}",
                        cmap=cmap,
-                       plot_text_scale=plot_text_scale,
+                       font_scale=font_scale,
                        ax=ax,
                        state_label_stride=state_label_stride)

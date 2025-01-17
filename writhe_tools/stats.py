@@ -406,7 +406,7 @@ def H(p, weight: bool = True):
 
 def mi(x,
        y,
-       bins: int = 50,
+       bins: int = None,
        weights: np.ndarray = None,
        min_count: int = None,
        shift_min: bool = False,

@@ -90,7 +90,7 @@ def flat_index(i: torch.Tensor,
         return i * m + j - torch.floor_divide((2 * d0 + i) * (i + 1), 2)
     else:
         assert d0 == 1, "This function only works for d0=1 when triu=False, currently"
-        return i * m + j - torch.floor_divide(i * (m - 1) + j,  m).clamp(d0)
+        return i * m + j - torch.floor_divide(i * (m - 1) + j, m).clamp(d0)
 
 
 def triu_flat_indices(n: int, d0: int, d1: int = None):
@@ -132,7 +132,8 @@ def indices_stat(indices_list: list,
 
 def group_by(keys: np.ndarray,
              values: np.ndarray = None,
-             reduction: callable = None):
+             reduction: callable = None,
+             array: bool = False):
     """
     Performs grouping of the values based on keys and can perform an operation
     on all items of a key's set of values. Is a generalized version of torch_scatter
@@ -146,10 +147,15 @@ def group_by(keys: np.ndarray,
     times each key is seen.
     """
     if reduction is not None:
-        values = np.ones_like(keys) / len(keys) if values is None else values.squeeze()
-        return np.stack([i[-1] for i in group_by_(keys=keys, values=values, reduction=reduction)]) \
-            if values.ndim > 1 \
-            else np.asarray(group_by_(keys=keys, values=values, reduction=reduction))[:, -1]
+        values = np.ones_like(keys) if values is None else values.squeeze()
+        try:
+            return np.stack([i[-1] for i in group_by_(keys=keys, values=values, reduction=reduction)]) \
+                if values.ndim > 1 \
+                else np.asarray(group_by_(keys=keys, values=values, reduction=reduction))[:, -1]
+
+        except:
+            return [i[-1] for i in group_by_(keys=keys, values=values, reduction=reduction)]
+
     else:
         values = np.arange(len(keys)) if values is None else values
         return group_by_(keys).split_array_as_list(values)
@@ -201,8 +207,7 @@ def dx_indices_from_segments(segments: torch.LongTensor,
                              n: int,
                              d0: int,
                              triu: bool,
-                             n_batches: int=1):
-
+                             n_batches: int = 1):
     """
     Get the indices of the 4 displacement vectors
     needed to compute the writhe of each segment pair (first dim of segments).
@@ -217,21 +222,20 @@ def dx_indices_from_segments(segments: torch.LongTensor,
     """
 
     indices = torch.stack([flat_index(segments[:, i],
-                            segments[:, j],
-                            n=n,
-                            d0=d0,
-                            triu=triu)
-                 for i, j in zip((0, 0, 0, 1, 1, 2),
-                                 (1, 2, 3, 2, 3, 3))], 1).long()
+                                      segments[:, j],
+                                      n=n,
+                                      d0=d0,
+                                      triu=triu)
+                           for i, j in zip((0, 0, 0, 1, 1, 2),
+                                           (1, 2, 3, 2, 3, 3))], 1).long()
     if n_batches == 1:
         return indices
 
     else:
-        offset = n**2 if triu is False and d0 == 0\
-                 else (flat_index((n-1)-d0, (n-1), n=n, d0=d0, triu=True) + 1
-                 * (2 if not triu else 1))
+        offset = n ** 2 if triu is False and d0 == 0 \
+            else (flat_index((n - 1) - d0, (n - 1), n=n, d0=d0, triu=True) + 1
+                  * (2 if not triu else 1))
         pass
-
 
 
 def contiguous_bool(data: np.ndarray = None,
@@ -245,8 +249,8 @@ def contiguous_bool(data: np.ndarray = None,
     if condition is not None:
         assert data is not None, "If a callable condition is given, must provide data to operate on"
 
-    bools = np.insert(bools.astype(int) if bools is not None else\
-            condition(data).astype(int), 0, 0)
+    bools = np.insert(bools.astype(int) if bools is not None else \
+                          condition(data).astype(int), 0, 0)
 
     idx = np.insert(np.arange(len(bools) - 1), 0, 0)
 

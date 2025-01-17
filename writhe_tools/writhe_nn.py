@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from torch_scatter import scatter
 import math
 from typing import Optional
 from .utils.indexing import get_segments, flat_index
@@ -326,14 +325,17 @@ class WritheMessage(nn.Module):
     Expedited Writhe message layer.
 
     """
+
     def __init__(self,
                  n_atoms: int,
                  n_features: int,
                  batch_size: int,
-                 bins: int = 250,
+                 bins: int = 300,
                  node_attr: str = "invariant_node_features",
+                 edge_attr: str = "invariant_edge_features",
                  distance_attr: str = "edge_dist",
-                 dir_attr: str = "edge_dir",
+                 distance_attention: bool = True,
+                 #dir_attr: str = "edge_dir",
                  segment_length: int = 1,
                  gaussian_bins: bool = False,
                  bin_low: float = -1,
@@ -345,54 +347,60 @@ class WritheMessage(nn.Module):
 
         super().__init__()
 
+        from torch_scatter import scatter
+
         # prerequisit information
         segments = get_segments(n_atoms, length=segment_length, tensor=True)
         # need edges based on the segments the writhe is computed from
         edges = torch.cat([segments[:, [0, 2]], segments[:, [1, 3]]]).T
-
         # edges = torch.cat([edges, torch.flip(edges, (0,))], dim=1) # this doesn't help
-        if distance_attr is not None:
-            # if a batch already contains all the pairwise Euclidian distances,
-            # fetch them on the fly using flattened indices
-            self.register_buffer("distance_indices",
-                                (flat_index(*edges, n=n_atoms, d0=1).repeat(batch_size, 1)
-                                + int(n_atoms ** 2 - n_atoms) * torch.arange(batch_size).unsqueeze(-1)
-                                ).flatten()
-                                 )
+
+
             # self.register_buffer("distance_indices",
             #                      distance_indices)
             # self.register_buffer("distance_indices",
             #                      torch.cat([i * increment + dist_index for i in range(batch_size)]))
-        if dir_attr is not None:
-            dx_index = torch.stack([flat_index(segments[:, i],
-                                               segments[:, j],
-                                               n=n_atoms,
-                                               d0=1,
-                                               triu=False)
-                                    for i, j in zip((0, 0, 0, 1, 1, 2),
-                                                    (1, 2, 3, 2, 3, 3))], 1).long()
-            # retrieve the needed displacement vectors
-            # in the graph object (if they're there)
-            self.register_buffer("dir_indices",
-                                 (dx_index.repeat(batch_size, 1, 1)
-                                  + int(n_atoms ** 2 - n_atoms)
-                                  * torch.arange(batch_size).reshape(-1, 1, 1)
-                                  ).flatten(0, 1)
-                                 )
-            #self.register_buffer("dir_signs")
-            # the writhe has to be computed with a fixed sign convention
-            # signs
+        #else:
+
+        # if dir_attr is not None:
+        #     dx_index = torch.stack([flat_index(segments[:, i],
+        #                                        segments[:, j],
+        #                                        n=n_atoms,
+        #                                        d0=1,
+        #                                        triu=False)
+        #                             for i, j in zip((0, 0, 0, 1, 1, 2),
+        #                                             (1, 2, 3, 2, 3, 3))], 1).long()
+        #     # retrieve the needed displacement vectors
+        #     # in the graph object (if they're there)
+        #     self.register_buffer("dir_indices",
+        #                          (dx_index.repeat(batch_size, 1, 1)
+        #                           + int(n_atoms ** 2 - n_atoms)
+        #                           * torch.arange(batch_size).reshape(-1, 1, 1)
+        #                           ).flatten(0, 1)
+        #                          )
+        #     #self.register_buffer("dir_signs")
+        #     # the writhe has to be computed with a fixed sign convention
+        #     # signs
+
+        self.register_buffer("edge_indices",
+                            (flat_index(*edges, n=n_atoms, d0=1).repeat(batch_size, 1)
+                            + int(n_atoms ** 2 - n_atoms) * torch.arange(batch_size).unsqueeze(-1)
+                            ).flatten()
+                             )
 
         self.register_buffer("edges",
                              torch.cat([i * n_atoms + edges for i in range(batch_size)], axis=1).long())
+
         self.register_buffer("segments", segments)
         self.register_buffer("n_atoms_", torch.LongTensor([n_atoms]))
         self.register_buffer("batch_size_", torch.LongTensor([batch_size]))
         self.register_buffer("segment_length", torch.LongTensor([segment_length]))
+        self.register_buffer("distance_attention_", torch.LongTensor([int(distance_attention)]))
 
         self.node_attr = node_attr
+        self.edge_attr = edge_attr
         self.distance_attr = distance_attr
-        self.dir_attr = dir_attr
+        #self.dir_attr = dir_attr
         self.n_features = n_features
         self.residual = residual
         self.bin_low = bin_low
@@ -415,29 +423,40 @@ class WritheMessage(nn.Module):
                                                  ).uniform_(-std, std),  # normal_(0, std)
                                     requires_grad=True)
                                 )
+        if not distance_attention:
+            self.attention = nn.Sequential(nn.Linear(n_features * 3, n_features, bias=False),
+                                           nn.SiLU(),
+                                           nn.Linear(n_features, 1, bias=False)
+                                           )
+
 
     @property
     def n_atoms(self):
         return self.n_atoms_.item()
 
+    @property
+    def distance_attention(self):
+        return self.distance_attention_.item()
+
+
     def embed_writhe(self, wr):
         return (self.soft_one_hot(wr).unsqueeze(-1) * self.basis).sum(-2)
 
     def compute_writhe(self, x):
-        if hasattr(x, str(self.dir_attr)):
-            i, j = (i.flatten() for i in x.edge_index)
-            # the writhe computation requires a fixed direction for displacement vectors,
-            # i.e. i -> j or j -> i but not both as the same computation will give opposite signs
-            dx, dx_index = divnorm(x[self.dir_attr] * (i - j).sign().reshape(-1, 1)), self.dir_indices
-        else:
-            dx, dx_index = None, None
+        # if hasattr(x, str(self.dir_attr)):
+        #     i, j = (i.flatten() for i in x.edge_index)
+        #     # the writhe computation requires a fixed direction for displacement vectors,
+        #     # i.e. i -> j or j -> i but not both as the same computation will give opposite signs
+        #     dx, dx_index = divnorm(x[self.dir_attr] * (i - j).sign().reshape(-1, 1)), self.dir_indices
+        # else:
+        #     dx, dx_index = None, None
 
         return self.embed_writhe(
-            writhe_segments_cross_index(
+            writhe_segments_cross(
                 xyz=x.x.reshape(-1, self.n_atoms, 3),
                 segments=self.segments,
-                dx=dx,
-                dx_index=dx_index
+                # dx=dx,
+                # dx_index=dx_index
                )).repeat(1, 2, 1).reshape(-1, self.n_features)
 
     def forward(self, x, update=True):
@@ -446,10 +465,19 @@ class WritheMessage(nn.Module):
         writhe = self.compute_writhe(x)
         # derive attention weights from distances - unrelated to calculation of the writhe from coordinates
         # if no distances computed, compute them
-        weights = (getattr(x, self.distance_attr)[self.distance_indices]
+        if self.distance_attention:
+
+            weights = (getattr(x, self.distance_attr)[self.distance_indices]
                    if hasattr(x, str(self.distance_attr))
                    else (x.x[src_node] - x.x[dst_node]).norm(dim=-1)
                    ).pow(2).neg().exp()
+        else:
+            weights = self.attention(
+                torch.cat([x[self.node_attr][src_node],
+                           x[self.node_attr][dst_node],
+                           x[self.edge_attr][self.edge_indices]\
+                               if hasattr(x, str(self.edge_attr)) else writhe
+                           ], 1))
 
         # get attention weights, softmax normalize, scatter
         attention = (weights / scatter(weights, dst_node)[dst_node]).unsqueeze(-1)

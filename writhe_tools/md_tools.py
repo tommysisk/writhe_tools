@@ -26,7 +26,7 @@ class ResidueDistances:
         if args is not None:
             if isinstance(args, str):
                 args = load_dict(args)
-            assert isinstance(args, dict), "args must dict or path to saved dict"
+            assert isinstance(args, dict), "args must be dict or path to saved dict"
             self.__dict__.update(args)
 
         # set up new instance, compute distances
@@ -71,15 +71,20 @@ class ResidueDistances:
         assert self.prefix == "Intra", "Must be intra molecular distances to subsample distances"
         return self.distances[:, triu_flat_indices(self.n, 1, d)]
 
-    def matrix(self, contacts: bool = False, cut_off: float = None):
+    def matrix(self, contacts: bool = False,
+               cut_off: float = None,
+               distances: np.ndarray=None):
+
+        distances = self.distances if distances is None else distances
 
         cut_off = self.contact_cutoff if cut_off is None else cut_off
 
         if contacts:
-            return to_contact_matrix(to_distance_matrix(self.distances, self.n, self.m),
+            assert cut_off is not None, "Must provide contact cutoff in init statement or as an argument"
+            return to_contact_matrix(to_distance_matrix(distances, self.n, self.m),
                                      cut_off=cut_off)
         else:
-            return to_distance_matrix(self.distances, self.n, self.m)
+            return to_distance_matrix(distances, self.n, self.m)
 
     def plot(self, index: "list, int, str" = None,
              contacts: bool = False,
@@ -99,18 +104,24 @@ class ResidueDistances:
             unit = " (nm)"
 
         if index is None:
-            matrix = self.matrix(contacts, contact_cut_off).mean(0)
+            matrix = self.matrix(contacts,
+                                 contact_cut_off,
+                                 distances=self.distances.mean(0))
             __stype = "Average "
 
         elif isinstance(index, (int, float)):
             index = int(index)
-            matrix = self.matrix(contacts, contact_cut_off)[index]
+            matrix = self.matrix(contacts,
+                                 contact_cut_off,
+                                 self.distances[index])
             __stype = ""
             dscr = f"Frame {index}"
 
         else:
             index = to_numpy(index).astype(int)
-            matrix = self.matrix(contacts, contact_cut_off)[index].mean(0)
+            matrix = self.matrix(contacts,
+                                 contact_cut_off,
+                                 self.distances[index].mean(0))
             __stype = "Average "
 
             if dscr == "":
@@ -310,6 +321,16 @@ def calc_rsa(traj: "traj object or str",
         np.save(file_name, rsa)
 
     return rsa
+
+
+def Rg(x: np.ndarray) -> float:
+    """
+    Unweighted radius of gyration
+    Args
+        x : (n_frames, n_atoms, 3) np.ndarray
+    """
+
+    return np.power(np.linalg.norm(x - x.mean(-1, keepdims=True), axis=-1), 2).mean(-1) ** (1/2)
 
 
 def traj_slice(traj, selection):

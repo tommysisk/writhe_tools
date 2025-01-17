@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 from itertools import chain
 from .stats import pmf
+from typing import Union, Optional, List
 
 
 def box_plot(values: np.ndarray,
@@ -281,6 +282,8 @@ def fes2d(x: np.ndarray,
           vmax: float = None,
           vmin : float = None,
           cluster_centers=None,
+          cluster_label_color: Optional[Union[str, List[str]]] = "black",
+          cluster_label_size: Optional[float] = None,
           bins: int = 180,
           weights: np.ndarray = None,
           density: bool = False,
@@ -383,7 +386,6 @@ def fes2d(x: np.ndarray,
     ax.set_yticks(np.linspace(extent[1][0], extent[1][1], nyticks),
                   np.linspace(extent[1][0], extent[1][1], nyticks).round(tick_decimals))
 
-
     if cbar:
         if contour_lines:
             cbar_ticks = s.levels[1:] - np.diff(s.levels) / 2
@@ -398,7 +400,7 @@ def fes2d(x: np.ndarray,
                             ticks=cbar_ticks)
 
         cbar.set_label("Free Energy / (kT)", size=14 * font_scale)
-        cbar.ax.tick_params(labelsize=8)
+        cbar.ax.tick_params(labelsize=8 * font_scale)
 
 
     # ax.set_aspect(aspect=aspect, share=True)
@@ -429,9 +431,14 @@ def fes2d(x: np.ndarray,
         # ax2.set_xticks([])
         # ax2.set_yticks([])
 
-        for j, i in enumerate(cluster_centers):
+        cluster_label_color = len(cluster_centers) * [cluster_label_color]\
+                              if isinstance(cluster_label_color, str) \
+                              else cluster_label_color
+
+        for j, (i, cc) in enumerate(zip(cluster_centers, cluster_label_color)):
             ax.annotate(f"{j + 1}", [i[k] for k in range(2)],
-                         color="black", size=str(10 * font_scale))
+                         color=cc,
+                        size=str(10 * font_scale) if cluster_label_size is None else cluster_label_size)
         # if hide_ax:
         #     pass
         #     # ax2.set_axis_off()
