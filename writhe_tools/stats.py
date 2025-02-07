@@ -97,15 +97,11 @@ def pmf(x: "list of arrays or array",
     """
     if isinstance(x, np.ndarray):
         x = x.squeeze()
-        if x.ndim > 1:
-            return pmfdd(x, bins, weights, norm, range)
-        else:
-            return pmf1d(x, bins, weights, norm, range)
+        return pmfdd(x, bins, weights, norm, range) if x.ndim > 1\
+                    else pmf1d(x, bins, weights, norm, range)
     if isinstance(x, list):
-        if len(x) == 1:
-            return pmf1d(x[0], bins, weights, norm, range)
-        else:
-            return pmfdd(x, bins, weights, norm, range)
+        return pmf1d(x[0], bins, weights, norm, range) if len(x) == 1 \
+                    else pmfdd(x, bins, weights, norm, range)
 
 
 def mean(x: np.ndarray, weights: np.ndarray = None, ax: int = 0):
@@ -392,6 +388,8 @@ def silhouette_scores(data: np.ndarray,
 
 def adjust_min(x):
     idx = np.isclose(x, 0)
+    if idx.sum() == 0:
+        return x
     where = np.where(idx)
     x[where] = x[~idx].min()
     return x / x.sum()
@@ -437,9 +435,7 @@ def mi(x,
 
     else:
 
-        """Only consider non-zero bins. Renormalizes distributions after removing zeros.
-           This gives same result as SKLearn but we can factor in weights using cluster
-           similarity function"""
+        """Only consider non-zero bins"""
 
         i, j = np.where(pxy != 0)
         px, py = pxy.sum(1), pxy.sum(0)
@@ -603,7 +599,9 @@ class MaxEntropyReweight():
                  regularize: bool = False,
                  sigma_reg: list = None,
                  data_indices: list = None,
-                 store_result: bool = False
+                 store_result: bool = False,
+                 whiten: bool = False,
+                 standardize: bool = False
                  ):
 
         args = []
@@ -617,7 +615,19 @@ class MaxEntropyReweight():
         else:
             constraints, targets, lambdas0 = self.constraints, self.targets, self.lambdas0
 
-        args.extend([constraints, targets])
+        if whiten:
+            mu = constraints.mean(0)
+            w = matrix_power(constraints.T @ constraints / len(constraints), -1 / 2)
+            args.extend([(i - mu).reshape(-1, len(targets)) @ w for i in (constraints, targets)])
+
+        elif standardize:
+            mu = constraints.mean(0)
+            s = std(constraints, ax=0)
+            args.extend([np.divide((i - mu), s, out=np.zeros_like(i), where=s != 0.)
+                                     for i in (constraints, targets)])
+
+        else:
+            args.extend([constraints, targets])
 
         if regularize:
             assert sigma_reg is not None or self.sigma_reg is not None, (

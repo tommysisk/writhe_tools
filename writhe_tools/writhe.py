@@ -16,14 +16,12 @@ import math
 from joblib import Parallel, delayed
 from typing import Optional, Union, Tuple, List
 
-
 from .utils.indexing import split_list, get_segments
 from .utils.torch_utils import estimate_segment_batch_size, catch_cuda_oom
-from .writhe_nn import writhe_segments_cross
+from .writhe_nn import writhe_segments
 from .utils.filing import save_dict, load_dict
 from .utils.misc import to_numpy, Timer
 from .stats import window_average, mean
-
 
 
 class MplFilter(logging.Filter):
@@ -41,15 +39,14 @@ matplotlib.text._log.addFilter(MplFilter())
 # The more straight forward way of computing the writhe is implemented in writhe_nn,
 # this computation is written specifically for ray and should not be used otherwise
 
-
 def divnorm(x):
     return x / np.linalg.norm(x, axis=-1, keepdims=True)
 
 
-def writhe_segment(segment=None, xyz=None):
+def writhe_segment(segment=None, xyz=None, use_cross: bool = True):
     """
     Version of the writhe computation written specifically for CPU + ray parallelization.
-    See writhe_tools.writhe_nn.wirthe_segments for cleaner implementation that is generally more efficient.
+    See writhe_tools.writhe_nn.writhe_segments for cleaner implementation that is generally more efficient.
     We use this version because ray manages memory and parallelization for large computations.
 
     compute the writhe (signed crossing) of 2 segments for all frames (index 0) in xyz (xyz can contain just one frame)
@@ -66,19 +63,27 @@ def writhe_segment(segment=None, xyz=None):
 
     # for the following, array broadcasting is (surprisingly) slower than list comprehensions
     # when using ray!! (without ray, broadcasting is faster).
-    dots = np.stack([(dx[:, i] * dx[:, j]).sum(-1)
-                     for i, j in zip([0, 0, 0, 1, 1, 2],
-                                     [1, 2, 3, 2, 3, 3])], axis=-1)
-    # indices
-    u, v, h = [0, 4, 5, 1], \
-              [4, 5, 1, 0], \
-              [2, 3, 2, 3]
+    if use_cross:
+        theta = np.stack([divnorm(np.cross(dx[:, i], dx[:, j], axis=-1))
+                          for i, j in zip([0, 1, 3, 2], [1, 3, 2, 0])], axis=1)
 
-    # surface area from scalars
+        theta = np.stack([np.arcsin((theta[:, i] * theta[:, j]).sum(-1).clip(-1, 1))
+                          for i, j in zip([0, 1, 2, 3], [1, 2, 3, 0])], axis=1).squeeze().sum(1)
 
-    theta = np.sum([np.arcsin(((dots[:, i] * dots[:, j] - dots[:, k])
-                               / np.sqrt(abs(((1 - dots[:, i] ** 2) * (1 - dots[:, j] ** 2))).clip(1e-10))
-                               ).clip(-1, 1)) for i, j, k in zip(u, v, h)], axis=0)
+    else:
+        theta = np.stack([(dx[:, i] * dx[:, j]).sum(-1)
+                          for i, j in zip([0, 0, 0, 1, 1, 2],
+                                          [1, 2, 3, 2, 3, 3])], axis=-1)
+        # indices
+        u, v, h = [0, 4, 5, 1], \
+            [4, 5, 1, 0], \
+            [2, 3, 2, 3]
+
+        # surface area from scalars
+
+        theta = np.sum([np.arcsin(((theta[:, i] * theta[:, j] - theta[:, k])
+                                   / np.sqrt(abs(((1 - theta[:, i] ** 2) * (1 - theta[:, j] ** 2))).clip(1e-17))
+                                   ).clip(-1, 1)) for i, j, k in zip(u, v, h)], axis=0)
 
     signs = np.sign(np.sum(dx[:, 0] * np.cross(xyz[:, segment[3]] - xyz[:, segment[2]],
                                                xyz[:, segment[1]] - xyz[:, segment[0]], axis=-1),
@@ -118,8 +123,8 @@ def writhe_batches_cuda(xyz: torch.Tensor,
                         segments: torch.LongTensor,
                         device: int = 0):
     xyz = xyz.to(device)
-    result = torch.cat([writhe_segments_cross(xyz, i).cpu() for i in segments], axis=-1).numpy() \
-        if isinstance(segments, (list, tuple)) else writhe_segments_cross(xyz=xyz, segments=segments).cpu().numpy()
+    result = torch.cat([writhe_segments(xyz, i).cpu() for i in segments], axis=-1).numpy() \
+        if isinstance(segments, (list, tuple)) else writhe_segments(xyz=xyz, segments=segments).cpu().numpy()
     del xyz
     torch.cuda.empty_cache()
     return result
@@ -133,7 +138,6 @@ def calc_writhe_parallel_cuda(xyz: torch.Tensor,
                               segments: torch.LongTensor,
                               batch_size: int = None,
                               multi_proc: bool = True) -> np.ndarray:
-
     batch_size = estimate_segment_batch_size(len(xyz)) if batch_size is None else batch_size
 
     if batch_size > len(segments):
@@ -243,7 +247,7 @@ class Writhe:
                 warnings.warn("You are not using any multiprocessing! "
                               "Multiprocessing on CPU is managed by ray"
                               "and avoids issues with memory overflow.")
-                return writhe_segments_cross(segments=torch.from_numpy(segments).long(),
+                return writhe_segments(segments=torch.from_numpy(segments).long(),
                                        xyz=torch.from_numpy(xyz)).numpy()
 
     def compute_writhe(self,
@@ -323,7 +327,7 @@ class Writhe:
     def save(self,
              path: Optional[str] = None,
              dscr: Optional[str] = None,
-            ) -> None:
+             ) -> None:
 
         """
         Save the current writhe data to a file.
@@ -344,7 +348,7 @@ class Writhe:
         keys = ["writhe_features", "n_points", "n", "length", "segments"]
 
         file = (f"{path}/writhe_data_dict_length_{self.length}" if dscr is None
-                    else f"{path}/{dscr}_writhe_data_dict_length_{self.length}") + ".pkl"
+                else f"{path}/{dscr}_writhe_data_dict_length_{self.length}") + ".pkl"
 
         save_dict(file, {key: getattr(self, key) for key in keys})
 

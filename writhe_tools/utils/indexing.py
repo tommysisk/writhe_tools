@@ -203,6 +203,47 @@ def get_segments(n: int = None,
             return torch.from_numpy(segments).long() if tensor else segments
 
 
+def incidence_writhe_edges(num_nodes):
+    """
+    Generate a torch tensor of node pairs corresponding to the transformation |B| W_edge |B|^T,
+    and expand W_flattened to match the node pairs for scatter operations.
+    W_edge is the pairwise writhe matrix and B is the incidence matrix of the segments
+    used in the computation of the writhe.
+
+    Args:
+        num_nodes (int): Number of nodes in the sequential graph.
+        contextual but now removed:
+            W_flattened (torch.Tensor): Flattened upper-triangular writhe values (excluding diagonal and first off-diagonal).
+
+    Returns:
+        node_pairs (torch.Tensor): A (2, num_pairs) tensor where each column represents a (node_i, node_j) pair.
+        W_expanded (torch.Tensor): Expanded writhe values matching the node pairs for scatter operations.
+    """
+    num_edges = num_nodes - 1  # Sequential graph has (N-1) edges
+
+    # Generate non-adjacent edge pairs
+    edge_pairs = [(i, j) for i in range(num_edges) for j in range(i + 2, num_edges)]
+
+    # Map edge pairs to node pairs using the incidence matrix
+    node_pairs = []
+    for edge_i, edge_j in edge_pairs:
+        # Nodes associated with edges in a sequential graph
+        node_i1, node_i2 = edge_i, edge_i + 1
+        node_j1, node_j2 = edge_j, edge_j + 1
+
+        # Each writhe value contributes to the four corresponding node pairs
+        node_pairs.extend([(node_i1, node_j1), (node_i1, node_j2),
+                           (node_i2, node_j1), (node_i2, node_j2)])
+
+    # Convert to torch tensor
+    node_pairs_tensor = torch.tensor(node_pairs, dtype=torch.long).T  # Shape: (2, num_pairs)
+
+    # Expand W_flattened to match the node pairs for scatter operations
+    #W_expanded = W_flattened.repeat_interleave(4)
+
+    return node_pairs_tensor
+
+
 def dx_indices_from_segments(segments: torch.LongTensor,
                              n: int,
                              d0: int,
