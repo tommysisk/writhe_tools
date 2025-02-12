@@ -1,23 +1,30 @@
+import sys
 from setuptools import setup, find_packages
-import os
 
-# grab requirements from requirements.txt
-lib_folder = os.path.dirname(os.path.realpath(__file__))
-requirement_path = f"{lib_folder}/requirements.txt"
-install_requires = []
-if os.path.isfile(requirement_path):
-    with open(requirement_path) as f:
-        install_requires = f.read().splitlines()
+# Explicit version check
+if sys.version_info < (3, 7) or sys.version_info >= (3, 11):
+    sys.exit("Error: Writhe_Package_Lite requires Python 3.7–3.10.")
 
 setup(
     name='Writhe_Package_Lite',
     version='1',
-    packages=find_packages(),
-    install_requires=install_requires,
-    #python_requires="~=3.10.14",
+    packages=find_packages(where='src'),
+    package_dir={"": "src"},
+    python_requires=">=3.7, <3.11",  # PEP 345 standard
+    extras_require={
+        'graph': [
+            'torch-scatter>=2.1.1,<3.0',
+            'pytorch_lightning>=2.0.9.post0,<3.0'
+        ],
+        'dev': [
+            'pytest>=6.0.0,<8.0.0',
+            'black>=22.0.0,<24.0.0',
+            'flake8>=4.0.0,<6.0.0'
+        ]
+    },
     url='',
-    license='',
+    license='MIT',
     author='Thomas Sisk',
     author_email='Thomas.r.Sisk.gr@dartmouth.edu',
     description='Compute writhe and train Writhe-PaiNN score based generative models with torch'
-    )
+)
