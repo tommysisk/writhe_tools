@@ -156,20 +156,20 @@ def compute_writhe(self,
 ---
 
 ### **Arguments**
-| Parameter         | Type                      | Default  | Description |
-|------------------|--------------------------|---------|-------------|
-| `length`         | `int`                     | **Required** | Segment length for computation. |
-| `matrix`         | `bool`                    | `False` | If `True`, generates a **symmetric writhe matrix**. |
-| `store_results`  | `bool`                    | `True` | If `True`, stores results in the `Writhe` instance. |
-| `xyz`            | `Optional[np.ndarray]`    | `None` | Coordinate array used for computation. If `None`, uses `self.xyz`. |
-| `n_points`       | `Optional[int]`           | `None` | Number of points in the **topology**. Defaults to `xyz.shape[1]`. |
-| `speed_test`     | `bool`                    | `False` | If `True`, performs a **benchmark test** without storing results. |
-| `cpus_per_job`   | `int`                     | `1` | Number of **CPUs allocated per batch**. |
-| `cuda`           | `bool`                    | `False` | If `True`, enables **CUDA acceleration** for GPU computation. |
-| `cuda_batch_size` | `Optional[int]`           | `None` | Batch size for **CUDA computation**. |
-| `multi_proc`     | `bool`                    | `True` | If `True`, enables **multiprocessing** (parallel execution). |
-| `use_cross`      | `bool`                    | `True` | If `True`, uses **cross product** in computation. |
-| `cpu_method`     | `str`                      | `"ray"` | CPU computation method (`"ray"` for multiprocessing, `"numba"` for JIT-compiled CPU execution). |
+| Parameter         | Type                      | Default  | Description                                                                                                                                                                                               |
+|------------------|--------------------------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `length`         | `int`                     | **Required** | Segment length for computation.                                                                                                                                                                           |
+| `matrix`         | `bool`                    | `False` | If `True`, generates a **symmetric writhe matrix**. Generating the full redndant matrix should be avoided and only done transiently for plotting! Using the class method plot_writhe_matrix is preferred  |
+| `store_results`  | `bool`                    | `True` | If `True`, stores results in the `Writhe` instance.                                                                                                                                                       |
+| `xyz`            | `Optional[np.ndarray]`    | `None` | Coordinate array used for computation. If `None`, uses `self.xyz`.                                                                                                                                        |
+| `n_points`       | `Optional[int]`           | `None` | Number of points in the **topology**. Defaults to `xyz.shape[1]`.                                                                                                                                         |
+| `speed_test`     | `bool`                    | `False` | If `True`, performs a **benchmark test** without storing results.                                                                                                                                         |
+| `cpus_per_job`   | `int`                     | `1` | Number of **CPUs allocated per batch**.                                                                                                                                                                   |
+| `cuda`           | `bool`                    | `False` | If `True`, enables **CUDA acceleration** for GPU computation.                                                                                                                                             |
+| `cuda_batch_size` | `Optional[int]`           | `None` | Batch size for **CUDA computation**.                                                                                                                                                                      |
+| `multi_proc`     | `bool`                    | `True` | If `True`, enables **multiprocessing** (parallel execution).                                                                                                                                              |
+| `use_cross`      | `bool`                    | `True` | If `True`, uses **cross product** in computation.                                                                                                                                                         |
+| `cpu_method`     | `str`                      | `"ray"` | CPU computation method (`"ray"` for multiprocessing, `"numba"` for JIT-compiled CPU execution).                                                                                                           |
 
 ---
 
