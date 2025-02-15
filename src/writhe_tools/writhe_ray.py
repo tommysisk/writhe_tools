@@ -27,38 +27,34 @@ def writhe_segment(segment=None,
     # broadcasting trick
     # negative sign, None placement and order are intentional, don't change without testing equivalent option
     dx = divnorm((-xyz[:, segment[:2], None] + xyz[:, segment[None, 2:]]).reshape(-1, 4, 3))
-
+    signs = np.sign(np.sum(dx[:, 0] * np.cross(xyz[:, segment[3]] - xyz[:, segment[2]],
+                                               xyz[:, segment[1]] - xyz[:, segment[0]], axis=-1),
+                           axis=-1)).squeeze()
     # for the following, array broadcasting is (surprisingly) slower than list comprehensions
     # when using ray!! (without ray, broadcasting is faster).
     if use_cross:
-        theta = np.stack([divnorm(np.cross(dx[:, i], dx[:, j], axis=-1))
+        dx = np.stack([divnorm(np.cross(dx[:, i], dx[:, j], axis=-1))
                           for i, j in zip([0, 1, 3, 2], [1, 3, 2, 0])], axis=1)
 
-        theta = np.stack([np.arcsin((theta[:, i] * theta[:, j]).sum(-1).clip(-1, 1))
+        dx = np.stack([np.arcsin((dx[:, i] * dx[:, j]).sum(-1).clip(-1, 1))
                           for i, j in zip([0, 1, 2, 3], [1, 2, 3, 0])], axis=1).squeeze().sum(1)
 
     else:
-        theta = np.stack([(dx[:, i] * dx[:, j]).sum(-1)
+        dx = np.stack([(dx[:, i] * dx[:, j]).sum(-1)
                           for i, j in zip([0, 0, 0, 1, 1, 2],
                                           [1, 2, 3, 2, 3, 3])], axis=-1)
         # indices
         u, v, h = [0, 4, 5, 1], \
-            [4, 5, 1, 0], \
-            [2, 3, 2, 3]
+                  [4, 5, 1, 0], \
+                  [2, 3, 2, 3]
 
         # surface area from scalars
 
-        theta = np.sum([np.arcsin(((theta[:, i] * theta[:, j] - theta[:, k])
-                                   / np.sqrt(abs(((1 - theta[:, i] ** 2) * (1 - theta[:, j] ** 2))).clip(1e-17))
+        dx = np.sum([np.arcsin(((dx[:, i] * dx[:, j] - dx[:, k])
+                                   / np.sqrt(abs(((1 - dx[:, i] ** 2) * (1 - dx[:, j] ** 2))).clip(1e-17))
                                    ).clip(-1, 1)) for i, j, k in zip(u, v, h)], axis=0)
 
-    signs = np.sign(np.sum(dx[:, 0] * np.cross(xyz[:, segment[3]] - xyz[:, segment[2]],
-                                               xyz[:, segment[1]] - xyz[:, segment[0]], axis=-1),
-                           axis=-1)).squeeze()
-
-    wr = (theta * signs) / (2 * np.pi)
-
-    return wr
+    return (dx * signs) / (2 * np.pi)
 
 
 # @ray.remote

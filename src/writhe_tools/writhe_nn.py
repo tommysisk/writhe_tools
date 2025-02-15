@@ -43,32 +43,33 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor, use_cross: bool =
     dx = divnorm((-xyz[:, segments[:, :2], None]
                   + xyz[:, segments[:, None, 2:]]
                   ).reshape(-1, len(segments), 4, 3))
+
+    signs = (torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
+                         xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
+                         dim=-1) * dx[:, :, 0]).sum(-1).sign()
+
     if use_cross:
-        theta = divnorm(torch.cross(dx[:, :, [0, 1, 3, 2]],
+        dx = divnorm(torch.cross(dx[:, :, [0, 1, 3, 2]],
                                     dx[:, :, [1, 3, 2, 0]],
                                     dim=-1))
 
-        theta = (theta[:, :, [0, 1, 2, 3]] * theta[:, :, [1, 2, 3, 0]]).sum(-1).clip(-1, 1).arcsin().sum(2)
+        dx = (dx[:, :, [0, 1, 2, 3]] * dx[:, :, [1, 2, 3, 0]]).sum(-1).clip(-1, 1).arcsin().sum(2)
     else:
         # compute all dot products, then work with scalars
-        theta = (dx[:, :, [0, 0, 0, 1, 1, 2]] * dx[:, :, [1, 2, 3, 2, 3, 3]]).sum(-1)
+        dx = (dx[:, :, [0, 0, 0, 1, 1, 2]] * dx[:, :, [1, 2, 3, 2, 3, 3]]).sum(-1)
         # get indices; dots is ordered according to indices of 3,3 upper right triangle
         # we compute dots first because we use each twice
         u, v, h = [0, 4, 5, 1], \
                   [4, 5, 1, 0], \
                   [2, 3, 2, 3]
         # surface area from scalars
-        theta = ((theta[:, :, u] * theta[:, :, v] - theta[:, :, h])
+        dx = ((dx[:, :, u] * dx[:, :, v] - dx[:, :, h])
 
-                 / ((1 - theta[:, :, u] ** 2) * (1 - theta[:, :, v] ** 2)).clamp(min=1e-16).sqrt()
+                 / ((1 - dx[:, :, u] ** 2) * (1 - dx[:, :, v] ** 2)).clamp(min=1e-16).sqrt()
 
                  ).clip(-1, 1).arcsin().sum(-1)
 
-    signs = (torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
-                         xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
-                         dim=-1) * dx[:, :, 0]).sum(-1).sign()
-
-    return torch.squeeze(theta * signs) / (2 * torch.pi)
+    return torch.squeeze(dx * signs) / (2 * torch.pi)
 
 
 class TorchWrithe(nn.Module):

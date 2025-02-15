@@ -291,9 +291,11 @@ def pca(x: np.ndarray,
         n_comp: int = 10,
         dask: bool = False):
     """compute the business half of econ svd"""
-    x = standardize(x, shift=shift, scale=scale, weights=weights) / (np.sqrt(x.shape[0]) if not scale else 1)
-    s, vt = svd(x, full_matrices=False)[1:] if not dask else\
-            dask_svd(x, k=n_comp, compressed=True)[1:]
+    x = standardize(x, shift=shift, scale=scale, weights=weights) 
+    s, vt = svd(x / (np.sqrt(x.shape[0]) if not scale else 1),
+                full_matrices=False)[1:] if not dask else\
+            dask_svd(x / (np.sqrt(x.shape[0]) if not scale else 1),
+                     k=n_comp, compressed=True)[1:]
 
     v = vt.T[:, :n_comp]
 
