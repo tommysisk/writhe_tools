@@ -75,16 +75,18 @@ We can then compute the writhe at a given segment length, save the result for la
 from the saved result to continue analysis or visualization.
 
 ```jupyterpython
+from writhe_tools.tcca import tCCA
+from writhe_tools.stats import pca
 # compute the writhe using segment length 1 and default arguments
 
 writhe.compute_writhe(length=1)
 
-# save the result with default arguments (None, see below next code block)
+# results are stored to the class instance (see details in following cell about compute_writhe)
 
+# save the result with default arguments (None, see below next code block)
 writhe.save(path=None, dscr=None)
 
 # restore the calculation at a later time using the CLASS method, load
-
 restored_writhe = Writhe.load("./writhe_data_dict_length_1.pkl")
 ```
 
@@ -97,40 +99,108 @@ Or if path and dscr are left to None:
 ```jupyterpython
 f"./writhe_data_dict_length_{self.length}.pkl"
 ```
- The *compute_writhe* method has many options. Here's an example with descriptions of all the arguments.
- Only the argument defining the segment length, **length**, is required. Note that calculation can be performed 
-on multiple (**multi_proc**=True) CPU or GPU (**cuda**=True) devices. If using GPUs, it is best to avoid interactive kernels like jupyter notebooks due 
-to known issues with clearing GPU memory and to manually set **cuda_batch_size** to avoid out of memory errors. 
+
+### **Example Usage **
+ - **NOTE** it is recommended to access and plot writhe data using the class
+            to avoid data duplication which may cause memory issues.
+
+The results of the writhe calculation are accessible from the class for further analysis and visualization :
+```jupyterpython
+import matplotlib.pyplot as plt
+# compute at length 5
+writhe.compute_writhe(length=5)
+fig, axes = plt.subplots(1, 3, figsize=(14, 3))
+ax=axes.flat
+writhe.plot_writhe_matrix(ax=ax[0], label_stride=8) #xticks=residues, yticks=residues to match example
+writhe.plot_writhe_per_segment(ax=ax[1])
+writhe.plot_writhe_total(ax=ax[2], window=250)
+fig.tight_layout()
+
+```
+![Alt text](./images/writhe_example_plot.png)
 
 ```jupyterpython
-results = writhe.compute_writhe(
-          length=1,  # Default segment length
-          matrix=False,  # Default: Do not return the symmetric writhe matrix
-          store_results=True,  # Default: Bind calculation results to class for plotting
-          xyz=None,  # Default: Use the coordinates from the class instance (self.xyz)
-          n_points=None,  # Default: Use n_points from the class instance (self.n_points)
-          speed_test=False,  # Default: Do not perform speed test
-          cpus_per_job=1,  # Default: Use 1 CPU per job
-          cuda=False,  # Default: Do not use CUDA (use CPU instead)
-          cuda_batch_size=None,  # Default: No batch size for CUDA (not used since cuda=False)
-          multi_proc=True  # Default: Use multi-processing
-        )
+from writhe_tools.tcca import tCCA
+from writhe_tools.plots import fes2d
+tcca = tCCA(writhe.writhe_features, lag=30).fit()
+print(f"VAMP2 Score (dim 10) : {(tcca.svals[:10]**2).sum()}")
+projection = tcca.transform(dim=2, scale=False)
+fes2d(projection)
 ```
 
-- NOTES:
-  - The *compute_writhe* method returns a dictionary of the results. If store_result=True, there's no need to assign a variable to the return.
 
-  - the argument, **store_result**, of *compute_writhe* must be set to True (Default) in order to plot or save calculation
-  results. 
 
-  - The class will automatically switch to CPU calculation if cuda is not available.
+## `Writhe.compute_writhe`
+### **Description**
+`compute_writhe` is a method of the `Writhe` class that computes the writhe for a given segment length between all segments using **parallel computation** on **CPU (Ray or Numba)** or **GPU (CUDA)**.
 
+### **Method Signature**
+```python
+def compute_writhe(self,
+                   length: int,
+                   matrix: bool = False,
+                   store_results: bool = True,
+                   xyz: Optional[np.ndarray] = None,
+                   n_points: Optional[int] = None,
+                   speed_test: bool = False,
+                   cpus_per_job: int = 1,
+                   cuda: bool = False,
+                   cuda_batch_size: Optional[int] = None,
+                   multi_proc: bool = True,
+                   use_cross: bool = True,
+                   cpu_method: str = "ray"
+                   ) -> Optional[dict]:
+```
+
+
+---
+
+### **Arguments**
+| Parameter         | Type                      | Default  | Description |
+|------------------|--------------------------|---------|-------------|
+| `length`         | `int`                     | **Required** | Segment length for computation. |
+| `matrix`         | `bool`                    | `False` | If `True`, generates a **symmetric writhe matrix**. |
+| `store_results`  | `bool`                    | `True` | If `True`, stores results in the `Writhe` instance. |
+| `xyz`            | `Optional[np.ndarray]`    | `None` | Coordinate array used for computation. If `None`, uses `self.xyz`. |
+| `n_points`       | `Optional[int]`           | `None` | Number of points in the **topology**. Defaults to `xyz.shape[1]`. |
+| `speed_test`     | `bool`                    | `False` | If `True`, performs a **benchmark test** without storing results. |
+| `cpus_per_job`   | `int`                     | `1` | Number of **CPUs allocated per batch**. |
+| `cuda`           | `bool`                    | `False` | If `True`, enables **CUDA acceleration** for GPU computation. |
+| `cuda_batch_size` | `Optional[int]`           | `None` | Batch size for **CUDA computation**. |
+| `multi_proc`     | `bool`                    | `True` | If `True`, enables **multiprocessing** (parallel execution). |
+| `use_cross`      | `bool`                    | `True` | If `True`, uses **cross product** in computation. |
+| `cpu_method`     | `str`                      | `"ray"` | CPU computation method (`"ray"` for multiprocessing, `"numba"` for JIT-compiled CPU execution). |
+
+---
+
+### **Returns**
+A `dict` containing the writhe computation results:
+
+| Key                 | Type              | Description |
+|---------------------|------------------|-------------|
+| `length`           | `int`             | The segment length used for computation. |
+| `n_points`        | `int`             | Number of points in the topology. |
+| `n`               | `int`             | Number of frames in `xyz`. |
+| `writhe_features` | `np.ndarray`      | Computed **writhe values** for all segments. |
+| `segments`        | `np.ndarray`      | The list of segments used in the computation. |
+| *(Optional)* `writhe_matrix` | `np.ndarray` | If `matrix=True`, returns a **symmetric writhe matrix**. |
+
+If `speed_test=True`, the function **returns `None`** and doesn't store results.
+
+---
+
+### **Additional Notes**
+- Calculation can be performed on multiple **CPU cores (`multi_proc=True`)** or **GPU devices (`cuda=True`, `multi_proc=True`)**.
+- **If using CUDA**, it is recommended (but not necessarily required) to :
+  - **Avoid interactive environments like Jupyter notebooks**, as they may not properly clear GPU memory.
+  - **Prepare to manually set `cuda_batch_size`** to avoid **out-of-memory (OOM) errors**.
+
+---
 
 
 The class also has plotting methods with many options
 ```jupyterpython
 writhe.plot_writhe_matrix(
-    ave=True,                     # ave: bool = True
                                  # (Averages the writhe matrix across frames by default)
     index=None,                   # index: Optional[Union[int, List[int], str, np.ndarray]] = None
                                  # (Plots the average writhe matrix if index is None)
@@ -155,7 +225,6 @@ writhe.plot_writhe_matrix(
 )
 
 writhe.plot_writhe_per_segment(
-    ave=True,                      # ave: bool = True
                                   # (Averages over all frames by default)
     index=None,                    # index: Optional[Union[int, List[int], str, np.ndarray]] = None
                                   # (Plots the average writhe per segment if index is None)
