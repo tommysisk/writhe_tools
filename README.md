@@ -109,7 +109,7 @@ import matplotlib.pyplot as plt
 writhe.compute_writhe(length=5)
 fig, axes = plt.subplots(1, 2, figsize=(14, 3))
 ax=axes.flat
-writhe.plot_writhe_matrix(ax=ax[0], label_stride=8) #xticks=residues, yticks=residues, to match example
+writhe.plot_writhe_matrix(index=None, ax=ax[0], label_stride=8) #xticks=residues, yticks=residues, to match example
 writhe.plot_writhe_total(ax=ax[1], window=250)
 ax[1].hlines(0,0,len(xyz), ls="--", color="gray")
 fig.tight_layout()
