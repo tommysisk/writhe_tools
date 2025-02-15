@@ -288,7 +288,7 @@ def fes2d(x: np.ndarray,
           weights: np.ndarray = None,
           density: bool = False,
           extent: list = None,
-          n_contours: int = 7,
+          n_contours: int = 180,
           alpha_contours: float = 1,
           contour_lines: bool = False,
           alpha_lines: float = 0.6,
@@ -387,7 +387,7 @@ def fes2d(x: np.ndarray,
                   np.linspace(extent[1][0], extent[1][1], nyticks).round(tick_decimals))
 
     if cbar:
-        if contour_lines:
+        if contour_lines or n_contours < 8:
             cbar_ticks = s.levels[1:] - np.diff(s.levels) / 2
 
         else:

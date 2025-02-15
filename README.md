@@ -75,8 +75,6 @@ We can then compute the writhe at a given segment length, save the result for la
 from the saved result to continue analysis or visualization.
 
 ```jupyterpython
-from writhe_tools.tcca import tCCA
-from writhe_tools.stats import pca
 # compute the writhe using segment length 1 and default arguments
 
 writhe.compute_writhe(length=1)

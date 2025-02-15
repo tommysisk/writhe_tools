@@ -12,6 +12,8 @@ numpy_indexed<1.0,>=0.3.7
 tqdm<5.0,>=4.63.0
 joblib<2.0,>=1.1.0
 pyblock<1.0,>=0.6
+torch-geometric<3.0,>=2.3.1
+numba<0.61.0,>=0.55.0
 
 [dev]
 pytest<8.0.0,>=6.0.0
@@ -19,6 +21,5 @@ black<24.0.0,>=22.0.0
 flake8<6.0.0,>=4.0.0
 
 [graph]
-torch-geometric<3.0,>=2.3.1
 torch-scatter<3.0,>=2.1.1
 pytorch_lightning<3.0,>=2.0.9.post0

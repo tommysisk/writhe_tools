@@ -2,9 +2,7 @@
 __author__ = "Thomas.R.Sisk@DartmouthCollege"
 
 import os
-import ray
-import multiprocessing
-import functools
+
 import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
@@ -14,11 +12,13 @@ import logging
 import torch
 import math
 from joblib import Parallel, delayed
-from typing import Optional, Union, Tuple, List
+from typing import Optional, Union, List
 
 from .utils.indexing import split_list, get_segments
 from .utils.torch_utils import estimate_segment_batch_size, catch_cuda_oom
 from .writhe_nn import writhe_segments
+from .writhe_ray import writhe_segments_ray
+from.writhe_numba import writhe_segments_numba
 from .utils.filing import save_dict, load_dict
 from .utils.misc import to_numpy, Timer
 from .stats import window_average, mean
@@ -39,95 +39,22 @@ matplotlib.text._log.addFilter(MplFilter())
 # The more straight forward way of computing the writhe is implemented in writhe_nn,
 # this computation is written specifically for ray and should not be used otherwise
 
-def divnorm(x):
-    return x / np.linalg.norm(x, axis=-1, keepdims=True)
+def calc_writhe_parallel(xyz: np.ndarray,
+                        segments:np.ndarray,
+                        use_cross: bool = True,
+                        cpus_per_job=1,
+                        cpu_method: str="ray"):
 
+    assert cpu_method in ["ray", "numba"], "method should be 'ray' or 'numba'."
 
-def writhe_segment(segment=None,
-                   xyz=None,
-                   use_cross: bool = True):
-    """
-    Version of the writhe computation written specifically for CPU + ray parallelization.
-    See writhe_tools.writhe_nn.writhe_segments for cleaner implementation that is generally more efficient.
-    We use this version because ray manages memory and parallelization for large computations.
-
-    compute the writhe (signed crossing) of 2 segments for all frames (index 0) in xyz (xyz can contain just one frame)
-    **provide both of the following**
-    segment: numpy array of shape (4,) giving the indices of the 4 alpha carbons in xyz creating 2 segments:::
-             array([seg1_start_point,seg1_end_point,seg2_start_point,seg2_end_point])
-    xyz: numpy array of shape (Nframes, N_alpha_carbons, 3),coordinate array giving the positions of ALL the alpha carbons
-
-    """
-    xyz = xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
-    # broadcasting trick
-    # negative sign, None placement and order are intentional, don't change without testing equivalent option
-    dx = divnorm((-xyz[:, segment[:2], None] + xyz[:, segment[None, 2:]]).reshape(-1, 4, 3))
-
-    # for the following, array broadcasting is (surprisingly) slower than list comprehensions
-    # when using ray!! (without ray, broadcasting is faster).
-    if use_cross:
-        theta = np.stack([divnorm(np.cross(dx[:, i], dx[:, j], axis=-1))
-                          for i, j in zip([0, 1, 3, 2], [1, 3, 2, 0])], axis=1)
-
-        theta = np.stack([np.arcsin((theta[:, i] * theta[:, j]).sum(-1).clip(-1, 1))
-                          for i, j in zip([0, 1, 2, 3], [1, 2, 3, 0])], axis=1).squeeze().sum(1)
-
-    else:
-        theta = np.stack([(dx[:, i] * dx[:, j]).sum(-1)
-                          for i, j in zip([0, 0, 0, 1, 1, 2],
-                                          [1, 2, 3, 2, 3, 3])], axis=-1)
-        # indices
-        u, v, h = [0, 4, 5, 1], \
-            [4, 5, 1, 0], \
-            [2, 3, 2, 3]
-
-        # surface area from scalars
-
-        theta = np.sum([np.arcsin(((theta[:, i] * theta[:, j] - theta[:, k])
-                                   / np.sqrt(abs(((1 - theta[:, i] ** 2) * (1 - theta[:, j] ** 2))).clip(1e-17))
-                                   ).clip(-1, 1)) for i, j, k in zip(u, v, h)], axis=0)
-
-    signs = np.sign(np.sum(dx[:, 0] * np.cross(xyz[:, segment[3]] - xyz[:, segment[2]],
-                                               xyz[:, segment[1]] - xyz[:, segment[0]], axis=-1),
-                           axis=-1)).squeeze()
-
-    wr = (theta * signs) / (2 * np.pi)
-
-    return wr
-
-
-# @ray.remote
-def writhe_segments_along_axis(segments: np.ndarray,
-                               xyz: np.ndarray,
-                               use_cross: bool = True,
-                               axis: int = 1):
-    """helper function for parallelization to compute writhe over chuncks of segments for all frames in xyz"""
-    # noinspection PyTypeChecker
-    return np.apply_along_axis(func1d=functools.partial(writhe_segment,
-                                                        xyz=xyz,
-                                                        use_cross=use_cross
-                                                        ),
-                               axis=axis, arr=segments)
-
-
-# Ray parallelization is substantially faster than python multiprocessing
-def calc_writhe_parallel(segments: np.ndarray,
-                         xyz: np.ndarray,
-                         use_cross: bool = True,
-                         cpus_per_job: int = 1) -> "Nframes by Nsegments np.ndarray":
-    """parallelize writhe calculation by segment, avoids making multiple copies of coordinate (xyz) matrix using Ray shared memory"""
-    # ray.init()
-
-    xyz_ref = ray.put(xyz)  # reference to coordinates that all child processes can access without copying
-    writhe_segments_along_axis_ref = ray.remote(writhe_segments_along_axis)
-    chunks = np.array_split(segments, int(multiprocessing.cpu_count() / cpus_per_job))
-    result = np.concatenate(ray.get([writhe_segments_along_axis_ref.remote(segments=chunk,
-                                                                           xyz=xyz_ref,
-                                                                           use_cross=use_cross)
-                                     for chunk in chunks])).T.squeeze()
-    ray.internal.free(xyz_ref)
-    ray.shutdown()
-    return result
+    if cpu_method == "ray":
+        return writhe_segments_ray(xyz=xyz,
+                                   segments=segments,
+                                   use_cross=use_cross,
+                                   cpus_per_job=cpus_per_job)
+    if cpu_method == "numba":
+        return writhe_segments_numba(xyz=xyz,
+                                     segments=segments)
 
 
 def writhe_batches_cuda(xyz: torch.Tensor,
@@ -145,8 +72,6 @@ def writhe_batches_cuda(xyz: torch.Tensor,
 
 
 # noinspection PyArgumentList
-
-
 @catch_cuda_oom
 def calc_writhe_parallel_cuda(xyz: torch.Tensor,
                               segments: torch.LongTensor,
@@ -154,7 +79,7 @@ def calc_writhe_parallel_cuda(xyz: torch.Tensor,
                               batch_size: int = None,
                               multi_proc: bool = True) -> np.ndarray:
 
-    batch_size = estimate_segment_batch_size(len(xyz)) if batch_size is None else batch_size
+    batch_size = estimate_segment_batch_size(xyz) if batch_size is None else batch_size
 
     if batch_size > len(segments):
         return writhe_batches_cuda(xyz, segments, use_cross=use_cross, device=0)
@@ -176,7 +101,8 @@ def calc_writhe_parallel_cuda(xyz: torch.Tensor,
 
 
 def to_writhe_matrix(writhe_features, n_points, length):
-    writhe_features = np.expand_dims(writhe_features, 0)
+    writhe_features = (np.expand_dims(writhe_features, 0) if writhe_features.ndim < 2
+                       else writhe_features)
     n = len(writhe_features)
     writhe_matrix = np.zeros([n] + [n_points - length] * 2)
 
@@ -237,7 +163,8 @@ class Writhe:
                         cuda: bool,
                         cuda_batch_size: int,
                         multi_proc: bool,
-                        use_cross: bool
+                        use_cross: bool,
+                        cpu_method: str = "ray"
                         ) -> np.ndarray:
         """
         Perform the writhe computation using either CPU or GPU parallelization.
@@ -253,6 +180,11 @@ class Writhe:
                               dot products (less accurate for very small angles, faster).
                               When using double precision, the dot product method should be virtualy indistinguishable from
                               the cross product version.
+            cpu_method (str) : cpu multiprocessing paradigm / framework - must be 'ray' or 'numba'
+                                'ray' if faster and is best for large jobs that use multiple resources
+                                'numba' is about an order of magnitude slower than ray.
+
+
 
         Returns:
             np.ndarray: Computed writhe features.
@@ -267,11 +199,15 @@ class Writhe:
         else:
             if cuda: print("You tried to use CUDA but it's not available according to torch, defaulting to CPUs.")
             if multi_proc:
-                return calc_writhe_parallel(segments=segments, xyz=xyz, cpus_per_job=cpus_per_job)
+                return calc_writhe_parallel(segments=segments,
+                                            xyz=xyz,
+                                            cpus_per_job=cpus_per_job,
+                                            cpu_method=cpu_method)
             else:
-                warnings.warn("You are not using any multiprocessing! "
-                              "Multiprocessing on CPU is managed by ray"
-                              "and avoids issues with memory overflow.")
+                warnings.warn("You are not using any multiprocessing or GPUs! "
+                              "Multiprocessing on CPU is managed by ray or numba."
+                              "ray handles big jobs best."
+                              ".... using torch broadcast calculation (returns numpy")
                 return writhe_segments(segments=torch.from_numpy(segments).long(),
                                        xyz=torch.from_numpy(xyz),
                                        use_cross=use_cross).numpy()
@@ -287,7 +223,8 @@ class Writhe:
                        cuda: bool = False,
                        cuda_batch_size: Optional[int] = None,
                        multi_proc: bool = True,
-                       use_cross: bool = True
+                       use_cross: bool = True,
+                       cpu_method: str = "ray"
                        ) -> Optional[dict]:
         """
         Compute writhe at the specified segment length.
@@ -325,9 +262,11 @@ class Writhe:
 
         if speed_test:
             with Timer():
-                _ = self.compute_writhe_(xyz, segments, cpus_per_job,
-                                         cuda, cuda_batch_size, multi_proc,
-                                         use_cross)
+                _ = self.compute_writhe_(xyz=xyz, segments=segments,
+                                         cpus_per_job=cpus_per_job,
+                                         cuda=cuda, cuda_batch_size=cuda_batch_size,
+                                         multi_proc=multi_proc, use_cross=use_cross,
+                                         cpu_method=cpu_method)
             return None
 
         results = dict(length=length,
@@ -335,9 +274,11 @@ class Writhe:
                        n=len(xyz),
                        )
 
-        results["writhe_features"] = self.compute_writhe_(xyz, segments, cpus_per_job,
-                                                          cuda, cuda_batch_size, multi_proc,
-                                                          use_cross)
+        results["writhe_features"] = self.compute_writhe_(xyz=xyz, segments=segments,
+                                                          cpus_per_job=cpus_per_job,
+                                                          cuda=cuda, cuda_batch_size=cuda_batch_size,
+                                                          multi_proc=multi_proc, use_cross=use_cross,
+                                                          cpu_method=cpu_method)
 
         results["segments"] = segments
 
@@ -428,7 +369,6 @@ class Writhe:
         return to_writhe_matrix(writhe_features, n_points, length)
 
     def plot_writhe_matrix(self,
-                           ave: bool = True,
                            index: Optional[Union[int, List[int], str, np.ndarray]] = None,
                            absolute: bool = False,
                            xlabel: Optional[str] = None,
@@ -448,7 +388,6 @@ class Writhe:
         or for a specific subset of frames. The matrix can be visualized with absolute values or as signed writhe.
 
         Args:
-            ave (bool, optional): If True, averages the writhe matrix across frames. Defaults to True.
             index (Optional[Union[int, List[int], str, np.ndarray]], optional): Frame index or indices to plot. Can be a single integer, list of integers, 'str', or numpy.ndarray. Defaults to None.
             absolute (bool, optional): If True, takes the absolute value of the writhe. Defaults to False.
             xlabel (Optional[str], optional): Label for the x-axis. Defaults to None.
@@ -481,7 +420,7 @@ class Writhe:
             norm = None
 
         # can't define norm until we know if it's a mean or not. if abs, then norm isn't needed
-        if (ave and (index is None)):
+        if index is None:
             mat = mean(mat, weights=weights)
             title = "Average Writhe Matrix"
         else:
@@ -561,11 +500,15 @@ class Writhe:
 
         pass
 
-    def plot_writhe_total(self, window: Optional[int] = None, ax: Optional[plt.Axes] = None) -> None:
+    def plot_writhe_total(self,
+                          absolute: Optional[bool] = False,
+                          window: Optional[int] = None,
+                          ax: Optional[plt.Axes] = None) -> None:
         """
         Plots the total absolute writhe across time steps.
 
         Args:
+            absolute Optional[bool], optional): Whether to take the absolute value of the writhe.
             window (Optional[int], optional): The size of the window for moving average smoothing. Defaults to None.
             ax (Optional[plt.Axes], optional): Matplotlib Axes object to plot on. If None, a new figure is created. Defaults to None.
 
@@ -575,7 +518,7 @@ class Writhe:
 
         self.check_data()
 
-        writhe_total = abs(self.writhe_features).sum(1)
+        writhe_total = np.sum((abs(self.writhe_features) if absolute else self.writhe_features), axis=1)
 
         if window is not None:
             data = window_average(x=writhe_total, N=window)
@@ -587,7 +530,7 @@ class Writhe:
         if ax is None:
             fig, ax = plt.subplots(1)
         ax.plot(data, color="red", label=legend)
-        ax.set_title("Total Absolute Writhe" + f"\n(Segment Length : {self.length})")
+        ax.set_title(f"Total {'Absolute' if absolute else ''} Writhe" + f"\n(Segment Length : {self.length})")
         ax.set_xlabel("Time Step")
         ax.set_ylabel("Total Writhe")
 
@@ -596,7 +539,7 @@ class Writhe:
         pass
 
     def plot_writhe_per_segment(self,
-                                ave: bool = True,
+                                absolute: Optional[bool] = False,
                                 index: Optional[Union[int, List[int], str, np.ndarray]] = None,
                                 xticks: Optional[List[str]] = None,
                                 label_stride: int = 5,
@@ -608,7 +551,7 @@ class Writhe:
         This method can either plot the average total writhe across frames, or plot the writhe for a specific frame (or set of frames).
 
         Args:
-            ave (bool, optional): If True, averages the writhe across frames. Defaults to True.
+            absolute (Optional[bool], optional): Whether or not to take the absolute value of the writhe.
             index (Optional[Union[int, List[int], str, np.ndarray]], optional): Frame index or indices to plot. Can be a single integer, list of integers, 'str', or numpy.ndarray. Defaults to None.
             xticks (Optional[List[str]], optional): List of tick labels for the x-axis. Defaults to None.
             label_stride (int, optional): Interval for displaying tick labels. Defaults to 5.
@@ -622,11 +565,11 @@ class Writhe:
             AssertionError: If `index` is not specified when `ave` is False.
         """
         self.check_data()
-        writhe_total = abs(self.matrix()).sum(1)
+        writhe_total = (abs(self.matrix()) if absolute else self.matrix()).sum(1)
 
-        if (ave and (index is None)):
+        if index is None:
             data = writhe_total.mean(0)
-            title = "Average Total Absolute Writhe Per Segment"
+            title = f"Average Total {'Absolute' if absolute else ''} Writhe Per Segment"
 
         else:
             assert index is not None, "If not plotting average, must specify index to plot"
@@ -634,7 +577,7 @@ class Writhe:
 
             if len(index) == 1:
                 data = writhe_total[index]
-                title = f"Total Absolute Writhe Per Segment: Frame {index}"
+                title = f"Total {'Absolute' if absolute else ''} Writhe Per Segment: Frame {index}"
             else:
                 data = writhe_total[index].mean(0)
                 if dscr is None:
@@ -643,9 +586,9 @@ class Writhe:
                                    " a description of the indices. "
                                    "Otherwise, the plotted data is ambiguous")
                                   )
-                    title = "Ensemble Averaged Total Absolute Writhe Per Segment"
+                    title = f"Ensemble Averaged Total {'Absolute' if absolute else ''} Writhe Per Segment"
                 else:
-                    title = f"Average Total Absolute Writhe Per Segment : {dscr}"
+                    title = f"Average Total {'Absolute' if absolute else ''} Writhe Per Segment : {dscr}"
 
         if ax is None:
             fig, ax = plt.subplots(1)
