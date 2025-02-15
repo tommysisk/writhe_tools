@@ -175,6 +175,7 @@ def compute_writhe(self,
 
 ### **Returns**
 A `dict` containing the writhe computation results:
+ - **NOTE** It is best to store the results in the class (store_result=True) and not set a variable to the output!
 
 | Key                 | Type              | Description |
 |---------------------|------------------|-------------|
