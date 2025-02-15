@@ -399,7 +399,7 @@ def fes2d(x: np.ndarray,
                             shrink=cbar_shrink,
                             ticks=cbar_ticks)
 
-        cbar.set_label("Free Energy / (kT)", size=14 * font_scale)
+        cbar.set_label("Free Energy / (kT)", size=12 * font_scale)
         cbar.ax.tick_params(labelsize=8 * font_scale)
 
 
