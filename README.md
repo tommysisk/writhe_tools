@@ -109,11 +109,11 @@ The results of the writhe calculation are accessible from the class for further 
 import matplotlib.pyplot as plt
 # compute at length 5
 writhe.compute_writhe(length=5)
-fig, axes = plt.subplots(1, 3, figsize=(14, 3))
+fig, axes = plt.subplots(1, 2, figsize=(14, 3))
 ax=axes.flat
-writhe.plot_writhe_matrix(ax=ax[0], label_stride=8) #xticks=residues, yticks=residues to match example
-writhe.plot_writhe_per_segment(ax=ax[1])
-writhe.plot_writhe_total(ax=ax[2], window=250)
+writhe.plot_writhe_matrix(ax=ax[0], label_stride=8) #xticks=residues, yticks=residues, to match example
+writhe.plot_writhe_total(ax=ax[1], window=250)
+ax[1].hlines(0,0,len(xyz), ls="--", color="gray")
 fig.tight_layout()
 
 ```
