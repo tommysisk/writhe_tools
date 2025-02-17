@@ -135,7 +135,8 @@ fes2d(projection)
 ### **Method Signature**
 ```python
 def compute_writhe(self,
-                   length: int,
+                   length: Optional[int] = None,
+                   segments: Optional[np.ndarray] = None,
                    matrix: bool = False,
                    store_results: bool = True,
                    xyz: Optional[np.ndarray] = None,
@@ -154,20 +155,21 @@ def compute_writhe(self,
 ---
 
 ### **Arguments**
-| Parameter         | Type                      | Default  | Description                                                                                                                                                                                               |
-|------------------|--------------------------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `length`         | `int`                     | **Required** | Segment length for computation.                                                                                                                                                                           |
-| `matrix`         | `bool`                    | `False` | If `True`, generates a **symmetric writhe matrix**. Generating the full redndant matrix should be avoided and only done transiently for plotting! Using the class method plot_writhe_matrix is preferred  |
-| `store_results`  | `bool`                    | `True` | If `True`, stores results in the `Writhe` instance.                                                                                                                                                       |
-| `xyz`            | `Optional[np.ndarray]`    | `None` | Coordinate array used for computation. If `None`, uses `self.xyz`.                                                                                                                                        |
-| `n_points`       | `Optional[int]`           | `None` | Number of points in the **topology**. Defaults to `xyz.shape[1]`.                                                                                                                                         |
-| `speed_test`     | `bool`                    | `False` | If `True`, performs a **benchmark test** without storing results.                                                                                                                                         |
-| `cpus_per_job`   | `int`                     | `1` | Number of **CPUs allocated per batch**.                                                                                                                                                                   |
-| `cuda`           | `bool`                    | `False` | If `True`, enables **CUDA acceleration** for GPU computation.                                                                                                                                             |
-| `cuda_batch_size` | `Optional[int]`           | `None` | Batch size for **CUDA computation**.                                                                                                                                                                      |
-| `multi_proc`     | `bool`                    | `True` | If `True`, enables **multiprocessing** (parallel execution).                                                                                                                                              |
-| `use_cross`      | `bool`                    | `True` | If `True`, uses **cross product** in computation.                                                                                                                                                         |
-| `cpu_method`     | `str`                      | `"ray"` | CPU computation method (`"ray"` for multiprocessing, `"numba"` for JIT-compiled CPU execution).                                                                                                           |
+| Parameter         | Type                   | Default                          | Description                                                                                                                                                                                              |
+|-------------------|------------------------|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `length`          | `Optional[int]`        | **Required if segments is None** | Segment length for computation.Prefered method of obtaining segments                                                                                                                                     |
+| `segments`        | `Optional[np.ndarray]` | **Required if length is None**   | Segments to use in computation. General uses should leave this to None and provide the length (int) arg to generate the segments automatically.                                                          |
+| `matrix`          | `bool`                 | `False`                          | If `True`, generates a **symmetric writhe matrix**. Generating the full redndant matrix should be avoided and only done transiently for plotting! Using the class method plot_writhe_matrix is preferred |
+| `store_results`   | `bool`                 | `True`                           | If `True`, stores results in the `Writhe` instance.                                                                                                                                                      |
+| `xyz`             | `Optional[np.ndarray]` | `None`                           | Coordinate array used for computation. If `None`, uses `self.xyz`.                                                                                                                                       |
+| `n_points`        | `Optional[int]`        | `None`                           | Number of points in the **topology**. Defaults to `xyz.shape[1]`.                                                                                                                                        |
+| `speed_test`      | `bool`                 | `False`                          | If `True`, performs a **benchmark test** without storing results.                                                                                                                                        |
+| `cpus_per_job`    | `int`                  | `1`                              | Number of **CPUs allocated per batch**.                                                                                                                                                                  |
+| `cuda`            | `bool`                 | `False`                          | If `True`, enables **CUDA acceleration** for GPU computation.                                                                                                                                            |
+| `cuda_batch_size` | `Optional[int]`        | `None`                           | Batch size for **CUDA computation**.                                                                                                                                                                     |
+| `multi_proc`      | `bool`                 | `True`                           | If `True`, enables **multiprocessing** (parallel execution).                                                                                                                                             |
+| `use_cross`       | `bool`                 | `True`                           | If `True`, uses **cross product** in computation.                                                                                                                                                        |
+| `cpu_method`      | `str`                  | `"ray"`                          | CPU computation method (`"ray"` for multiprocessing, `"numba"` for JIT-compiled CPU execution). 'ray' is substantially faster in most cases.                                                               |
 
 ---
 
@@ -175,13 +177,13 @@ def compute_writhe(self,
 A `dict` containing the writhe computation results:
  - **NOTE** It is best to store the results in the class (store_result=True) and not set a variable to the output!
 
-| Key                 | Type              | Description |
-|---------------------|------------------|-------------|
-| `length`           | `int`             | The segment length used for computation. |
-| `n_points`        | `int`             | Number of points in the topology. |
-| `n`               | `int`             | Number of frames in `xyz`. |
-| `writhe_features` | `np.ndarray`      | Computed **writhe values** for all segments. |
-| `segments`        | `np.ndarray`      | The list of segments used in the computation. |
+| Key                 | Type              | Description                                              |
+|---------------------|------------------|----------------------------------------------------------|
+| `length`           | `int`             | The segment length used for computation.                 |
+| `n_points`        | `int`             | Number of points in the topology.                        |
+| `n`               | `int`             | Number of frames in `xyz`.                               |
+| `writhe_features` | `np.ndarray`      | Computed **writhe values** for all segments.             |
+| `segments`        | `np.ndarray`      | The set of segments used in the computation.             |
 | *(Optional)* `writhe_matrix` | `np.ndarray` | If `matrix=True`, returns a **symmetric writhe matrix**. |
 
 If `speed_test=True`, the function **returns `None`** and doesn't store results.

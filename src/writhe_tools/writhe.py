@@ -197,7 +197,8 @@ class Writhe:
                                              multi_proc=multi_proc,
                                              use_cross=use_cross)
         else:
-            if cuda: print("You tried to use CUDA but it's not available according to torch, defaulting to CPUs.")
+            if cuda:
+                print("You tried to use CUDA but it's not available according to torch, defaulting to CPUs.")
             if multi_proc:
                 return calc_writhe_parallel(segments=segments,
                                             xyz=xyz,
@@ -206,14 +207,15 @@ class Writhe:
             else:
                 warnings.warn("You are not using any multiprocessing or GPUs! "
                               "Multiprocessing on CPU is managed by ray or numba."
-                              "ray handles big jobs best."
+                              "ray handles big jobs best and is fastest!."
                               ".... using torch broadcast calculation (returns numpy")
                 return writhe_segments(segments=torch.from_numpy(segments).long(),
                                        xyz=torch.from_numpy(xyz),
                                        use_cross=use_cross).numpy()
 
     def compute_writhe(self,
-                       length: int,
+                       length: int=None,
+                       segments: np.ndarray=None,
                        matrix: bool = False,
                        store_results: bool = True,
                        xyz: Optional[np.ndarray] = None,
@@ -230,7 +232,8 @@ class Writhe:
         Compute writhe at the specified segment length.
 
         Args:
-            length (int): Segment length for computation.
+            length (int, optional): Segment length for computation.
+            segments (np.ndarray, optional) : (n_segments, 4) int array specifying the segments to compute the writhe from.
             matrix (bool): Whether to generate a symmetric writhe matrix. Default: False.
             store_results (bool): Whether to store results in the class instance. Default: True.
             xyz (np.ndarray, optional): Coordinates to use for computation.
@@ -244,7 +247,11 @@ class Writhe:
         Returns:
             dict: Results of the computation, including writhe features and segments.
         """
+        assert (length is None) != (segments is None), ("Must provide either the length or the segments but not both."
+                                                        "In general, only the length arg should be set.")
 
+
+        assert not all(i is not None for i in (length, segments))
         if xyz is None:
             assert self.xyz is not None, \
                 "Must instantiate instance with coordinate array (xyz) or provide it as argument"
@@ -256,9 +263,7 @@ class Writhe:
             else:
                 n_points = xyz.shape[1]
 
-        # compute (indices) of all segments of a given length
-        segments = get_segments(n=n_points,
-                                length=length)
+        segments = get_segments(n=n_points, length=length) if length is not None else segments
 
         if speed_test:
             with Timer():
