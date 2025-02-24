@@ -385,6 +385,7 @@ class Writhe:
                            font_scale: float = 1,
                            cmap: Optional[str] = None,
                            ax: Optional[plt.Axes] = None,
+                           rotation: Optional[float] = 90,
                            weights: Optional[np.ndarray] = None) -> None:
         """
         Plots the writhe matrix for visualizing writhe values in topological frames.
@@ -486,7 +487,7 @@ class Writhe:
             else:
                 labels = np.arange(0, self.n_points)
 
-            rotation = 90 if key == "xticks" else None
+            rotation_ = rotation if key == "xticks" else None
 
             labels = labels[:-self.length][np.linspace(0,
                                                        self.n_points - self.length - 1,
@@ -499,7 +500,7 @@ class Writhe:
 
             _ = getattr(ax, f"set_{key}")(ticks=ticks,
                                           labels=labels,
-                                          rotation=rotation)
+                                          rotation=rotation_)
 
         ax.invert_yaxis()
 

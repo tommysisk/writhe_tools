@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from scipy import interpolate
 from scipy.optimize import minimize
 from scipy.stats import gaussian_kde
-from scipy.linalg import svd
+from scipy.linalg import svd, sqrtm
 import scipy
 import ray
 from sklearn.cluster import KMeans
@@ -23,6 +23,12 @@ from .utils.indexing import (group_by,
                              reindex_list,
                              product,
                              combinations)
+
+
+def inception_distance(x, y, ax: int = 0):
+    mu_x, mu_y = (mean(i, ax=ax) for i in (x, y))
+    Cx, Cy = (cov(i - mu, shift=False) for i, mu in zip((x, y), (mu_x, mu_y)))
+    return np.linalg.norm(mu_x - mu_y)**2 + np.trace(Cx + Cy - 2 * sqrtm(Cx @ Cy).real)
 
 
 def window_average(x, N):
@@ -235,7 +241,7 @@ def dask_svd(x,
         return x
 
 
-def matrix_power(x,
+def svd_power(x,
                  power,
                  epsilon: float = 1e-12,
                  dask=False,
@@ -248,7 +254,9 @@ def matrix_power(x,
             s, u = np.linalg.eigh(x)
             vt = u.T
         else:
-            u, s, vt = svd(x, full_matrices=False, lapack_driver="gesvd")
+            u, s, vt = svd(x,
+                           full_matrices=True if epsilon is None else False,
+                           lapack_driver="gesvd")
 
     if epsilon is not None:
         idx = s > epsilon
@@ -263,15 +271,21 @@ def matrix_power(x,
 
 # beautiful linear regression
 def generalized_regression(x: np.ndarray, y: np.ndarray, weights: np.ndarray = None,
-                           transform: bool = False, fit: bool = False, intercept: bool = True):
+                           transform: bool = False, fit: bool = False,
+                           intercept: bool = True, eps: float = 1e-10):
     if weights.squeeze().ndim != 1:
-        weights = matrix_power(weights, 1 / 2)
+        weights = sqrtm(weights)
     # prep covariance estimator
     cov_ = functools.partial(cov, shift=False, norm=False, weights=weights)
     # add column of ones (intercept D.O.F)
     x = add_intercept(np.copy(x)) if intercept else x
     # get co-effs (solve the linear algebra problem with psuedo inv)
-    b = matrix_power(cov_(x), -1, sym=True) @ cov_(x, y)
+    u, s, vt = svd(cov_(x), full_matrices=False)
+    if eps is not None:
+        idx = s > 1e-10
+        u, s, vt = u[:, idx], s[idx], vt[idx]
+
+    b = vt.T @ np.diag(1 / s) @ u.T @ cov_(x, y)
     # return fit
     if transform:
         return x @ b
@@ -291,7 +305,7 @@ def pca(x: np.ndarray,
         n_comp: int = 10,
         dask: bool = False):
     """compute the business half of econ svd"""
-    x = standardize(x, shift=shift, scale=scale, weights=weights) 
+    x = standardize(x, shift=shift, scale=scale, weights=weights)
     s, vt = svd(x / (np.sqrt(x.shape[0]) if not scale else 1),
                 full_matrices=False)[1:] if not dask else\
             dask_svd(x / (np.sqrt(x.shape[0]) if not scale else 1),
@@ -478,8 +492,9 @@ def block_error(x: np.ndarray):
     blocks = reblock(x)
     optimal_indices = np.asarray(find_optimal_block(n, blocks))
     isnan = np.isnan(optimal_indices)
-    mode = Counter(optimal_indices[~isnan].astype(int)).most_common()[0][0]
-    optimal_indices[isnan] = mode
+    #mode = Counter(optimal_indices[~isnan].astype(int)).most_common()[0][0]
+    optimal_indices[isnan] = -1 #mode
+    print(optimal_indices)
     return np.asarray([blocks[i].std_err[j] for j, i in enumerate(optimal_indices.astype(int))])
 
 
@@ -615,7 +630,7 @@ class MaxEntropyReweight():
 
         if whiten:
             mu = constraints.mean(0)
-            w = matrix_power(constraints.T @ constraints / len(constraints), -1 / 2)
+            w = svd_power(constraints.T @ constraints / len(constraints), -1 / 2)
             args.extend([(i - mu).reshape(-1, len(targets)) @ w for i in (constraints, targets)])
 
         elif standardize:
