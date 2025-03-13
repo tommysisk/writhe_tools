@@ -306,16 +306,17 @@ def pca(x: np.ndarray,
         dask: bool = False):
     """compute the business half of econ svd"""
     x = standardize(x, shift=shift, scale=scale, weights=weights)
-    s, vt = svd(x / (np.sqrt(x.shape[0]) if not scale else 1),
-                full_matrices=False)[1:] if not dask else\
-            dask_svd(x / (np.sqrt(x.shape[0]) if not scale else 1),
-                     k=n_comp, compressed=True)[1:]
+
+    norm = np.sqrt(x.shape) if scale is None and weights is None else 1
+
+    s, vt = svd(x / norm, full_matrices=False)[1:] if not dask else\
+            dask_svd(x / norm, k=n_comp, compressed=True)[1:]
 
     v = vt.T[:, :n_comp]
 
     projection = x @ v
     projection = projection / s[:n_comp] if scale_projection else projection
-    return projection, s, vt.T
+    return projection, s, v
 
 
 def corr(x: np.ndarray, y: np.ndarray):
@@ -898,7 +899,7 @@ class DensityComparator():
         else:
             hists = [pmf(i, bins=bins, norm=norm, range=self.bounds.squeeze()) for i in self.data_list]
 
-        self.hist_bin_centers = [i[-1] for i in hists]
+        self.hist_bin_centers = list(hists[0][-1])
         self.hist_dtrajs = [i[2] for i in hists]
         setattr(self, "hists_weighted" if weight else "hists", [i[0] for i in hists])
 

@@ -14,6 +14,7 @@ def box_plot(values: np.ndarray,
              ymin: float = None,
              ymax: float = None,
              cmap: str = "viridis",
+             color_height: bool = False,
              color_list: list = None,
              title: str = None,
              ax=None,
@@ -27,20 +28,20 @@ def box_plot(values: np.ndarray,
              trunc: int = 25,
              pre_trunc: int = 25,
              rotation: float = 0):
-
     values, errors = [i.squeeze() if i is not None else None for i in [values, errors]]
-
-    assert len(values.shape) == 1, \
-        "Need a set of values that can be squeezed to one dimension"
+    assert len(values.shape) == 1, "Need a set of values that can be squeezed to one dimension"
 
     nstates = len(values)
-
     labels = np.arange(1, nstates + 1).astype(str) if labels is None else labels
-
     assert len(labels) == nstates, "Length of values and labels must be the same"
 
-    color_list = get_color_list(nstates, cmap, trunc, pre_trunc)\
-                 if color_list is None else color_list
+    # Choose colors based on height if color_height is True
+    if color_height:
+        norm = plt.Normalize(vmin=values.min(), vmax=values.max())
+        cmap_fn = plt.get_cmap(cmap)
+        color_list = [cmap_fn(norm(val)) for val in values]
+    else:
+        color_list = get_color_list(nstates, cmap, trunc, pre_trunc) if color_list is None else color_list
 
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(10, 6))
@@ -50,7 +51,7 @@ def box_plot(values: np.ndarray,
            yerr=errors,
            ecolor="grey",
            color=color_list,
-           capsize=10,
+           capsize=capsize,
            width=width,
            linewidth=linewidth,
            edgecolor=edgecolor,
@@ -60,15 +61,10 @@ def box_plot(values: np.ndarray,
            )
 
     ax.set_xticks(ticks=np.arange(0, nstates, label_stride), labels=labels[::label_stride])
-    #     ax.set_xticklabels(labels[::label_stride], rotation=rotation)
-
     ax.set_xlabel(xlabel, size=6 * font_scale)
     ax.set_ylabel(ylabel, size=6 * font_scale)
     ax.set_title(title, size=6 * font_scale)
-
-    #if all(i is not None for i in (ymin, ymax)):
     ax.set_ylim(bottom=ymin, top=ymax)
-
     ax.tick_params("both", labelsize=6 * font_scale)
     ax.tick_params("x", labelrotation=rotation)
     ax.set_xlim([-.5, nstates - .5])
@@ -82,12 +78,80 @@ def get_color_list(n_colors: int, cmap: str, trunc=0, pre_trunc=0):
     return [cl[i] for i in np.linspace(1 + pre_trunc, len(cl) - 1 - trunc, n_colors).astype(int)]
 
 
-def truncate_colormap(cmap:str, minval=0.0, maxval=1.0, n=100):
+def truncate_colormap(cmap: str, minval=0.0, maxval=1.0, n=100):
     cmap = plt.get_cmap(cmap)
     new_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
         'trunc({n},{a:.2f},{b:.2f})'.format(n=cmap.name, a=minval, b=maxval),
         cmap(np.linspace(minval, maxval, n)))
     return new_cmap
+
+
+def annotated_matrix_plot(matrix: np.ndarray,
+                          error_matrix: np.ndarray = None,
+                          title: str = "Transition Matrix",
+                          xlabel=r"$State_{i}$",
+                          ylabel=r"$State_{j}$",
+                          unit: str = "",
+                          cbar_label: str = r"P($State_{j}$|$State_{i}$)",
+                          textcolor: str = "white",
+                          cmap="viridis",
+                          tick_labels: list = None,
+                          val_text_size: int = 40,
+                          err_text_size: int = 40,
+                          vmin: float = None,
+                          vmax: float = None,
+                          decimals: int = 2,
+                          font_scale: float = 1,
+                          figsize: float = 20,
+                          round_int=False,
+                          alpha: float = 0,
+                          ax=None):
+    """
+
+    mat = square matrix
+    error_matrix = matrix of same dim as mat with errors of values in mat
+    unit = string specifying the units
+
+    """
+
+    if ax is None:
+        fig, ax = plt.subplots(1, figsize=(figsize, figsize))
+
+    s = ax.imshow(matrix, cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha)
+
+    if tick_labels is None:
+        tick_labels = [f"{i + 1}" for i in range(matrix.shape[0])]
+
+    for i in range(len(matrix)):
+        for j in range(len(matrix)):
+            if round_int:
+                val = str(int(matrix[j, i]))
+                if error_matrix is not None:
+                    err = int(error_matrix[j, i])
+            else:
+                val = str(round(matrix[j, i], decimals))
+                if error_matrix is not None:
+                    err = str(round(error_matrix[j, i], decimals))
+
+            ax.text(i, j, f"{val + (' ' + unit if error_matrix is None else '')}",  # weird behavior
+                    va='center', ha='center',
+                    color=textcolor, size=val_text_size * font_scale,
+                    weight="bold")
+
+            if error_matrix is not None:
+                ax.text(i, j, "\n\n $\pm${}{}".format(err, unit),
+                        va='center', ha='center', color=textcolor,
+                        size=err_text_size * font_scale, weight="bold")
+
+    ax.set_yticks(list(range(len(matrix))), tick_labels, size=35 * font_scale)
+    ax.set_xticks(list(range(len(matrix))), tick_labels, size=35 * font_scale)
+    ax.set_ylabel(r"$State_{i}$" if xlabel is None else xlabel, size=45 * font_scale)
+    ax.set_xlabel(r"$State_{j}$" if ylabel is None else ylabel, size=45 * font_scale)
+    cb = plt.colorbar(s, ax=ax, label=cbar_label, fraction=0.046, pad=0.04)
+    cb.set_label(cbar_label, size=40 * font_scale)
+    cb.ax.tick_params(labelsize=30 * font_scale)
+    ax.set_title(title, size=45 * font_scale)
+    return
 
 
 def plot_distance_matrix(matrix: np.ndarray,
@@ -281,7 +345,7 @@ def fes2d(x: np.ndarray,
           cbar: bool = True,
           cmap: str = "jet",
           vmax: float = None,
-          vmin : float = None,
+          vmin: float = None,
           cluster_centers=None,
           cluster_label_color: Optional[Union[str, List[str]]] = "black",
           cluster_label_size: Optional[float] = None,
@@ -298,15 +362,15 @@ def fes2d(x: np.ndarray,
           scatter_cmap: str = "bone",
           scatter_size: float = 0.05,
           scatter_stride: int = 100,
-          scatter_min: float=0.2,
-          scatter_max: float=0.8,
+          scatter_min: float = 0.2,
+          scatter_max: float = 0.8,
           comp_type: str = None,
           mask: bool = True,
           font_scale: float = 1,
           cbar_shrink: float = 1,
           nxticks: int = 4,
           nyticks: int = 4,
-          tick_decimals: int=2,
+          tick_decimals: int = 2,
           extend_border: float = 1e-5,
           hide_ax: bool = False,
           ax=None,
@@ -323,13 +387,13 @@ def fes2d(x: np.ndarray,
         x, y = x.T
 
     if extent is None:
-        extent = [[x.min()-extend_border, x.max()+extend_border],
-                  [y.min()-extend_border, y.max()+extend_border]]
+        extent = [[x.min() - extend_border, x.max() + extend_border],
+                  [y.min() - extend_border, y.max() + extend_border]]
 
     counts, x_edges, y_edges = np.histogram2d(x, y, bins=bins, range=extent,
                                               weights=weights, density=density)
 
-    #xticks, yticks = (i[:-1] + np.diff(i) / 2 for i in (x_edges, y_edges))
+    # xticks, yticks = (i[:-1] + np.diff(i) / 2 for i in (x_edges, y_edges))
 
     mask_index = counts <= mask_thresh
 
@@ -345,16 +409,16 @@ def fes2d(x: np.ndarray,
     if ax is None:
         fig, ax = plt.subplots(1, figsize=(5, 3))
 
-    #ax.margins(extend_border, tight=False)
+    # ax.margins(extend_border, tight=False)
 
     if extend_border == 0:
         ax.set_aspect(aspect=aspect)
-        #extent = None
+        # extent = None
 
     s = ax.contourf(F.T,
                     levels=n_contours,
                     cmap=cmap,
-                    extent=tuple(chain(*extent)), #if extent is not None and extend_border != 0 else None,
+                    extent=tuple(chain(*extent)),  # if extent is not None and extend_border != 0 else None,
                     zorder=-1,
                     alpha=alpha_contours,
                     vmax=vmax,
@@ -380,9 +444,8 @@ def fes2d(x: np.ndarray,
         ax.set_xlim(extent[0][0], extent[0][1])
         ax.set_ylim(extent[1][0], extent[1][1])
 
-
     ax.set_xticks(np.linspace(extent[0][0], extent[0][1], nxticks),
-                  np.linspace(extent[0][0], extent[0][1],nxticks).round(tick_decimals))
+                  np.linspace(extent[0][0], extent[0][1], nxticks).round(tick_decimals))
 
     ax.set_yticks(np.linspace(extent[1][0], extent[1][1], nyticks),
                   np.linspace(extent[1][0], extent[1][1], nyticks).round(tick_decimals))
@@ -392,7 +455,7 @@ def fes2d(x: np.ndarray,
             cbar_ticks = s.levels[1:] - np.diff(s.levels) / 2
 
         else:
-            cbar_ticks = np.linspace(s.levels[0], s.levels[-1], num = 4, endpoint=True)
+            cbar_ticks = np.linspace(s.levels[0], s.levels[-1], num=4, endpoint=True)
 
         cbar = plt.colorbar(s,
                             ax=ax,
@@ -403,7 +466,6 @@ def fes2d(x: np.ndarray,
         cbar.set_label("Free Energy / (kT)", size=12 * font_scale)
         cbar.ax.tick_params(labelsize=8 * font_scale)
 
-
     # ax.set_aspect(aspect=aspect, share=True)
 
     if scatter:
@@ -412,15 +474,15 @@ def fes2d(x: np.ndarray,
         # ax1.set_xticks([])
         # ax1.set_yticks([])
         ax.scatter(x[::scatter_stride], y[::scatter_stride],
-                    cmap=truncate_colormap(scatter_cmap,
-                                           minval=scatter_min,
-                                           maxval=scatter_max,
-                                           n=len(c[::scatter_stride])),
-                    alpha=scatter_alpha,
-                    c=c[::scatter_stride],
-                    s=scatter_size)
+                   cmap=truncate_colormap(scatter_cmap,
+                                          minval=scatter_min,
+                                          maxval=scatter_max,
+                                          n=len(c[::scatter_stride])),
+                   alpha=scatter_alpha,
+                   c=c[::scatter_stride],
+                   s=scatter_size)
 
-        #ax1.autoscale_view()
+        # ax1.autoscale_view()
         # if hide_ax:
         #     pass
         #     # ax1.set_axis_off()
@@ -432,13 +494,13 @@ def fes2d(x: np.ndarray,
         # ax2.set_xticks([])
         # ax2.set_yticks([])
 
-        cluster_label_color = len(cluster_centers) * [cluster_label_color]\
-                              if isinstance(cluster_label_color, str) \
-                              else cluster_label_color
+        cluster_label_color = len(cluster_centers) * [cluster_label_color] \
+            if isinstance(cluster_label_color, str) \
+            else cluster_label_color
 
         for j, (i, cc) in enumerate(zip(cluster_centers, cluster_label_color)):
             ax.annotate(f"{j + 1}", [i[k] for k in range(2)],
-                         color=cc,
+                        color=cc,
                         size=str(10 * font_scale) if cluster_label_size is None else cluster_label_size)
         # if hide_ax:
         #     pass
@@ -450,8 +512,7 @@ def fes2d(x: np.ndarray,
         ax.set_axis_off()
         ax.axis("off")
         plt.gca().set_frame_on(False)
-    #ax.autoscale_view()
-
+    # ax.autoscale_view()
 
     return s
 
@@ -494,14 +555,13 @@ def subplots_fes2d(x: np.ndarray,
                    scatter_min: float = 0.2,
                    scatter_max: float = 0.8,
                    figsize: tuple = (6, 5)):
-
     x = np.stack([x, y], -1) if y is not None else x
 
     indices_list = list(range(len(x))) if indices_list is None else indices_list
 
-    extent = ([get_extrema(i, extend_border) for i in x.T] if isinstance(x, np.ndarray)\
-             else [get_extrema(i, extend_border) for i in np.concatenate(x)]) if extent is None and share_extent\
-             else extent
+    extent = ([get_extrema(i, extend_border) for i in x.T] if isinstance(x, np.ndarray) \
+                  else [get_extrema(i, extend_border) for i in np.concatenate(x).T]) if extent is None and share_extent \
+        else extent
 
     fig, axes = plt.subplots(rows, cols, sharey=sharey, sharex=sharex, figsize=figsize)
 
@@ -531,7 +591,7 @@ def subplots_fes2d(x: np.ndarray,
                       scatter_stride=scatter_stride,
                       scatter_min=scatter_min,
                       scatter_max=scatter_max,
-            )
+                      )
     else:
         for ax, indices, dscr, weights in zip(axes.flat, indices_list, dscrs, weights_list):
             s = fes2d(x[indices],
@@ -583,9 +643,9 @@ def subplots_fes2d(x: np.ndarray,
     #               y=bbox.y0 / (fig.bbox.height) - font_scale / 12 -.08*np.exp(1.4 - figsize[-1]),
     #               size=(100/6) * font_scale)#y=-title_pad-0.01,
     # fig.suptitle(title, y=1+title_pad, x = .5 - x_offset, size=(100/6) * font_scale)
-    fig.supylabel(ylabel, size=20*font_scale)
-    fig.supxlabel(xlabel, size=20*font_scale)
-    fig.suptitle(title, size=20*font_scale)
+    fig.supylabel(ylabel, size=20 * font_scale, )
+    fig.supxlabel(xlabel, size=20 * font_scale)
+    fig.suptitle(title, size=20 * font_scale, y=title_pad)
     return
 
 
@@ -616,7 +676,7 @@ def proj2d(x: np.ndarray,
            cbar_shrink: float = 1,
            nxticks: int = 4,
            nyticks: int = 4,
-           tick_decimals: int=2,
+           tick_decimals: int = 2,
            vmin: float = None,
            vmax: float = None,
            ax=None,
@@ -653,8 +713,8 @@ def proj2d(x: np.ndarray,
             norm = matplotlib.colors.BoundaryNorm(boundaries, listed_colormap.N, clip=True)
             s = ax.scatter(x, y, c=c, s=dot_size, cmap=cmap, norm=norm, alpha=alpha)
             tick_locs = (np.arange(nstates) + 0.5)
-            ticklabels = np.arange(1, nstates + 1).astype(str).tolist()\
-                         if cbar_labels is None else cbar_labels
+            ticklabels = np.arange(1, nstates + 1).astype(str).tolist() \
+                if cbar_labels is None else cbar_labels
             cbar = plt.colorbar(s, ax=ax, format=fmtr, shrink=cbar_shrink, )
             cbar.set_label(label="State" if cbar_label is None else cbar_label,
                            size=12 * font_scale)
@@ -699,7 +759,7 @@ def proj2d(x: np.ndarray,
     if cluster_centers is not None:
         for j, i in enumerate(cluster_centers):
             ax.annotate(f"{j + 1}", [i[k] for k in range(2)],
-                         color=center_font_color, size=str(10 * font_scale))
+                        color=center_font_color, size=str(10 * font_scale))
 
     return s
 
@@ -740,7 +800,8 @@ def subplots_proj2d(x: np.ndarray,
             indices_list = len(c) * [None]
 
     if c.ndim == 2:
-        assert c.shape[0] == len(indices_list), "If each plot has a different coloring, number must match number of datasets"
+        assert c.shape[0] == len(
+            indices_list), "If each plot has a different coloring, number must match number of datasets"
         color_indices = list(range(len(c)))
     else:
         assert c.ndim == 1, "c must be 1 or two dimensional"
@@ -773,7 +834,7 @@ def subplots_proj2d(x: np.ndarray,
                    vmax=vmax,
                    cbar_shrink=1,
                    aspect=aspect)
-        #ax.set_aspect(aspect)
+        # ax.set_aspect(aspect)
 
     fig.subplots_adjust(right=1.05, top=.82, bottom=.18)
     fmtr = lambda x, _: f"{x:.3f}"
@@ -795,7 +856,7 @@ def subplots_proj2d(x: np.ndarray,
     # bbox = ax.get_xaxis().get_label().get_window_extent()
     # fig.supxlabel(xlabel,  x = .5 - x_offset, y=bbox.y0 / (fig.bbox.height) - font_scale / 12 -.08*np.exp(1.4 - figsize[-1]), size=(100/6) * font_scale)#y=-title_pad-0.01,
     # fig.suptitle(title, y=1+title_pad, x = .5 - x_offset, size=(100/6) * font_scale)
-    fig.supylabel(ylabel, size=20*font_scale)
-    fig.supxlabel(xlabel, size=20*font_scale)
-    fig.suptitle(title, size=20*font_scale)
+    fig.supylabel(ylabel, size=20 * font_scale)
+    fig.supxlabel(xlabel, size=20 * font_scale)
+    fig.suptitle(title, size=20 * font_scale)
     return

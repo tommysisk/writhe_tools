@@ -1,10 +1,7 @@
 import torch
 import torch.nn as nn
-import math
-from typing import Optional
-from .utils.indexing import get_segments, flat_index, incidence_writhe_edges
+from .utils.indexing import get_segments, incidence_writhe_edges
 #from torch_scatter import scatter
-
 
 
 @torch.jit.script
@@ -14,7 +11,10 @@ def divnorm(x: torch.Tensor):
 
 
 @torch.jit.script
-def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor, use_cross: bool = True):
+def writhe_segments(xyz: torch.Tensor,
+                    segments: torch.Tensor,
+                    use_cross: bool = True,
+                    return_cross_: bool = False):
     """
     Compute the writhe (signed crossing) of 2 segment pairs for NSegments and all frames (index 0) in xyz
      (xyz can contain just one frame).
@@ -40,36 +40,43 @@ def writhe_segments(xyz: torch.Tensor, segments: torch.Tensor, use_cross: bool =
     segments, xyz = segments.unsqueeze(0) if segments.ndim < 2 else segments, \
         xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
 
-    dx = divnorm((-xyz[:, segments[:, :2], None]
-                  + xyz[:, segments[:, None, 2:]]
-                  ).reshape(-1, len(segments), 4, 3))
+    if return_cross_:
+        return torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
+                           xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
+                           dim=-1)
 
-    signs = (torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
-                         xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
-                         dim=-1) * dx[:, :, 0]).sum(-1).sign()
-
-    if use_cross:
-        dx = divnorm(torch.cross(dx[:, :, [0, 1, 3, 2]],
-                                    dx[:, :, [1, 3, 2, 0]],
-                                    dim=-1))
-
-        dx = (dx[:, :, [0, 1, 2, 3]] * dx[:, :, [1, 2, 3, 0]]).sum(-1).clip(-1, 1).arcsin().sum(2)
     else:
-        # compute all dot products, then work with scalars
-        dx = (dx[:, :, [0, 0, 0, 1, 1, 2]] * dx[:, :, [1, 2, 3, 2, 3, 3]]).sum(-1)
-        # get indices; dots is ordered according to indices of 3,3 upper right triangle
-        # we compute dots first because we use each twice
-        u, v, h = [0, 4, 5, 1], \
-                  [4, 5, 1, 0], \
-                  [2, 3, 2, 3]
-        # surface area from scalars
-        dx = ((dx[:, :, u] * dx[:, :, v] - dx[:, :, h])
 
-                 / ((1 - dx[:, :, u] ** 2) * (1 - dx[:, :, v] ** 2)).clamp(min=1e-16).sqrt()
+        dx = divnorm((-xyz[:, segments[:, :2], None]
+                      + xyz[:, segments[:, None, 2:]]
+                      ).reshape(-1, len(segments), 4, 3))
 
-                 ).clip(-1, 1).arcsin().sum(-1)
+        signs = (torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
+                             xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
+                             dim=-1) * dx[:, :, 0]).sum(-1).sign()
 
-    return torch.squeeze(dx * signs) / (2 * torch.pi)
+        if use_cross:
+            dx = divnorm(torch.cross(dx[:, :, [0, 1, 3, 2]],
+                                     dx[:, :, [1, 3, 2, 0]],
+                                     dim=-1))
+
+            dx = (dx[:, :, [0, 1, 2, 3]] * dx[:, :, [1, 2, 3, 0]]).sum(-1).clip(-1, 1).arcsin().sum(2)
+        else:
+            # compute all dot products, then work with scalars
+            dx = (dx[:, :, [0, 0, 0, 1, 1, 2]] * dx[:, :, [1, 2, 3, 2, 3, 3]]).sum(-1)
+            # get indices; dots is ordered according to indices of 3,3 upper right triangle
+            # we compute dots first because we use each twice
+            u, v, h = [0, 4, 5, 1], \
+                      [4, 5, 1, 0], \
+                      [2, 3, 2, 3]
+            # surface area from scalars
+            dx = ((dx[:, :, u] * dx[:, :, v] - dx[:, :, h])
+
+                  / ((1 - dx[:, :, u] ** 2) * (1 - dx[:, :, v] ** 2)).clamp(min=1e-16).sqrt()
+
+                  ).clip(-1, 1).arcsin().sum(-1)
+
+        return torch.squeeze(dx * signs) / (2 * torch.pi)
 
 
 class TorchWrithe(nn.Module):
@@ -82,28 +89,23 @@ class TorchWrithe(nn.Module):
         self.register_buffer("n_atoms_", torch.LongTensor([n_atoms]))
         self.register_buffer("n_features_", torch.LongTensor([n_features]))
         self.register_buffer("segments", get_segments(n_atoms, tensor=True))
-
         if incidence_edges:
             self.incidence_edges = True
-            self.register_buffer("indices",
-                                 torch.unique(incidence_writhe_edges(n_atoms),
-                                              dim=1,
-                                              return_inverse=True)[-1]
+
+            self.register_buffer("indices", torch.unique(incidence_writhe_edges(n_atoms),
+                                                         dim=1,
+                                                         return_inverse=True
+                                                         )[-1]
                                  )
 
-           # self.register_buffer("triu", torch.triu_indices(self.n_atoms, self.n_atoms, 1))
-           # unsort_full_edges = torch.cat([self.triu, self.triu.flip(0)], dim=-1)
-
             self.register_buffer("zeros", torch.zeros(int((n_atoms ** 2 - n_atoms) / 2 - 2)))
-            # we need to comply with row-wise ordering (PaiNN) after computing the triu of the Laplacian
-            self.register_buffer("sort",
-                                 torch.einsum("ij,i->j",
-                                              torch.cat([torch.triu_indices(self.n_atoms, self.n_atoms, 1),
-                                                        torch.triu_indices(self.n_atoms, self.n_atoms, 1).flip(0)],
-                                                        dim=-1).float(),
-                                             # unsort_full_edges.float(),
-                                              torch.Tensor([n_atoms, 1]).float()
-                                              ).argsort().squeeze().unsqueeze(-1))
+
+            self.register_buffer("sort", torch.einsum("ij,i->j",
+                                                      torch.cat([torch.triu_indices(n_atoms, n_atoms, 1),
+                                                                 torch.triu_indices(n_atoms, n_atoms, 1).flip(0)],
+                                                                 dim=-1).float(),
+                                                      torch.Tensor([n_atoms, 1]).float()
+                                                      ).argsort().squeeze())
         else:
             self.incidence_edges = False
 
@@ -115,36 +117,113 @@ class TorchWrithe(nn.Module):
     def n_features(self):
         return self.n_features_.item()
 
-    def forward(self, x):
+    def writhe_edges_(self, wr):
+        assert wr.ndim == 2, "arg 'wr' must be 2D"  # Case: No extra dimension (scalar sum)
+        triu = self.zeros.repeat(len(wr), 1).scatter_add_(1, self.indices.repeat(len(wr), 1),
+                                                          wr.repeat_interleave(4, 1))
+        return torch.nn.functional.pad(triu, (1, 1), 'constant', 0.0).repeat(1, 2)[:, self.sort]
+
+    def writhe_edges(self, wr):
+        if wr.ndim == 2:  # Case: No extra dimension (scalar sum)
+            return self.writhe_edges_(wr)
+        else:  # Case: Extra dimension present (vector sum)
+            return torch.stack([self.writhe_edges(i) for i in wr.permute(2, 0, 1)], dim=-1)
+
+    def forward(self, x, return_cross: bool = False):
+
         wr = writhe_segments(xyz=x.reshape(-1, self.n_atoms, 3),
-                            segments=self.segments)
+                             segments=self.segments,
+                             return_cross_=False)
+        if return_cross:
+            wr = [wr, writhe_segments(xyz=x.reshape(-1, self.n_atoms, 3),
+                                      segments=self.segments,
+                                      return_cross_=True)
+                  ]
 
-        if self.incidence_edges:
-            # compute the writhe graph Laplacian : B @ W @ B.T
-            # we only do this with non-redundant, flattened versions of the actual writhe matrix
-            # the computation is expanded to the required dimensions after
-            triu = torch.nn.functional.pad(
-                self.zeros.repeat(len(wr), 1).T.scatter_add_(0,
-                                                             self.indices.expand(-1, len(wr)),
-                                                             wr.T.repeat_interleave(4, dim=0)).T,
-                (1, 1),
-                mode='constant',
-                value=0.).T
-
-            return torch.cat([triu, triu])[self.sort].T.flatten()
-
-        else:
-            return wr
+        return ([self.writhe_edges(i) for i in wr] if self.incidence_edges else wr) if isinstance(wr, list) \
+                  else self.writhe_edges(wr) if self.incidence_edges else wr
 
 
 class AddWritheEdges(nn.Module):
     def __init__(self, n_atoms=20, n_features=64):
         super().__init__()
-        self.writhe = TorchWrithe()
+        self.writhe = TorchWrithe(n_atoms=n_atoms, n_features=n_features)
 
-    def forward(self, batch):
-        batch.writhe = self.writhe(batch.x)
-        return batch
+    def forward(self, batch, add_cross: bool=False):
+        if add_cross:
+            wr, vector = self.writhe(batch.x, return_cross=True)
+            batch.writhe, batch.vector = wr, vector
+            return batch
+        else:
+            batch.writhe = self.writhe(batch.x)
+            return batch
+
+
+
+
+# class TorchWrithe(nn.Module):
+#     def __init__(self,
+#                  n_atoms: int = 20,
+#                  n_features: int = 64,
+#                  incidence_edges: bool = True):
+#
+#         super().__init__()
+#         self.register_buffer("n_atoms_", torch.LongTensor([n_atoms]))
+#         self.register_buffer("n_features_", torch.LongTensor([n_features]))
+#         self.register_buffer("segments", get_segments(n_atoms, tensor=True))
+#
+#         if incidence_edges:
+#             self.incidence_edges = True
+#             self.register_buffer("indices",
+#                                  torch.unique(incidence_writhe_edges(n_atoms),
+#                                               dim=1,
+#                                               return_inverse=True)[-1].unsqueeze(-1)
+#                                  )
+#
+#            # self.register_buffer("triu", torch.triu_indices(self.n_atoms, self.n_atoms, 1))
+#            # unsort_full_edges = torch.cat([self.triu, self.triu.flip(0)], dim=-1)
+#
+#             self.register_buffer("zeros", torch.zeros(int((n_atoms ** 2 - n_atoms) / 2 - 2)))
+#             # we need to comply with row-wise ordering (PaiNN) after computing the triu of the Laplacian
+#             self.register_buffer("sort",
+#                                  torch.einsum("ij,i->j",
+#                                               torch.cat([torch.triu_indices(self.n_atoms, self.n_atoms, 1),
+#                                                         torch.triu_indices(self.n_atoms, self.n_atoms, 1).flip(0)],
+#                                                         dim=-1).float(),
+#                                              # unsort_full_edges.float(),
+#                                               torch.Tensor([n_atoms, 1]).float()
+#                                               ).argsort().squeeze())
+#         else:
+#             self.incidence_edges = False
+#
+#     @property
+#     def n_atoms(self):
+#         return self.n_atoms_.item()
+#
+#     @property
+#     def n_features(self):
+#         return self.n_features_.item()
+#
+#     def forward(self, x):
+#         wr = writhe_segments(xyz=x.reshape(-1, self.n_atoms, 3),
+#                             segments=self.segments)
+#
+#         if self.incidence_edges:
+#             # compute the writhe graph Laplacian : B @ W @ B.T
+#             # we only do this with non-redundant, flattened versions of the actual writhe matrix
+#             # the computation is expanded to the required dimensions after
+#             triu = torch.nn.functional.pad(
+#                 self.zeros.repeat(len(wr), 1).T.scatter_add_(0,
+#                                                              self.indices.expand(-1, len(wr)),
+#                                                              wr.T.repeat_interleave(4, dim=0)).T,
+#                 (1, 1),
+#                 mode='constant',
+#                 value=0.).T
+#
+#             return torch.cat([triu, triu])[self.sort].T.flatten()
+#
+#         else:
+#             return wr
 
 
 # class WritheMessage(nn.Module):

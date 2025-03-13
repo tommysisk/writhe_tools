@@ -10,6 +10,28 @@ from .utils.indexing import (triu_flat_indices,
                             product,)
 from .utils.sorting import filter_strs, lsdir
 from .plots import plot_distance_matrix, build_grid_plot
+from numba import njit, prange
+
+
+@njit
+def norm(a):
+    return np.sqrt(a[:, 0] * a[:, 0] + a[:, 1] * a[:,1] +  a[:, 2] * a[:, 2])
+
+@njit
+def distance_pair(xyz, pair, length=None):
+    displacements = xyz[:,pair[1]] - xyz[:,pair[0]]
+    # if we have periodic boundary conditions
+    if length is not None:
+        displacements -= length * np.round(displacements / length)
+    return norm(displacements) # return only the Euclidean distance
+
+
+@njit
+def parallel_distances(xyz, pairs, length=None):
+    distances = np.zeros((len(pairs),len(xyz)))
+    for i in prange(len(pairs)):
+        distances[i] = distance_pair(xyz, pairs[i], length)
+    return distances
 
 
 class ResidueDistances:
@@ -383,16 +405,20 @@ def to_distance_matrix(distances: np.ndarray,
 
 def residue_distances(traj,
                       index_0: np.ndarray,
-                      index_1: np.ndarray = None):
+                      index_1: np.ndarray = None,
+                      periodic: bool = True,
+                      parallel: bool = False):
     # intra distance case
     if index_1 is None:
         indices = combinations(index_0)
-        return md.compute_contacts(traj, indices)[0], indices
+        return md.compute_contacts(traj, indices, periodic=periodic)[0], indices if not parallel\
+                else parallel_distances(traj.xyz, indices, length=traj.unitcell_lengths if periodic else None)
 
     # inter distance case
     else:
         indices = product(index_0, index_1)
-        return md.compute_contacts(traj, indices)[0], indices
+        return md.compute_contacts(traj, indices, periodic=periodic)[0], indices if not parallel \
+                else parallel_distances(traj.xyz, indices, length=traj.unitcell_lengths if periodic else None)
 
 
 def to_contact_matrix(distances: np.ndarray, cut_off: float = 0.5):

@@ -124,9 +124,9 @@ def sorted_eig(x, sym=False, real=True, return_check=False):
         check_real[name] = check
 
     if real:
-        lam, v = [i.real for i in [lam, v]]
+        lam = np.abs(lam)
 
-    idx = abs(lam).argsort()[::-1]
+    idx = np.abs(lam).argsort()[::-1]
     lam = lam[idx]
     v = v[:, idx]
     if return_check:
@@ -200,12 +200,14 @@ def plot_its(estimate: np.ndarray, estimate_error=None, n_its: int = None,
     return
 
 
-def plot_cktest(predict: np.ndarray, estimate: np.ndarray,
-                lag: int, dt: float, unit: str = "ns",
+def plot_cktest(predict: np.ndarray, estimate: np.ndarray=None,
+                lag: int=1, dt: float=1, unit: str = "ns",
                 predict_color: str = "red", estimate_color: str = "black",
                 predict_fill_alpha=.4, estimate_fill_alpha=.4,
                 predict_errors=None, estimate_errors=None,
-                fill_estimate=True, title: str = None):
+                fill_estimate=True, title: str = None,
+                figsize: tuple = (15, 15),
+                font_scale: float = 1):
     """predict+errors should be of shape [2,predict/estimate.shape] where the 0th dim is upper and lower
     confidence intervals"""
 
@@ -228,20 +230,20 @@ def plot_cktest(predict: np.ndarray, estimate: np.ndarray,
                 axis=1)
 
     # same steps as for predictions
-    if not check_id(estimate[0]) and len(estimate) != len(predict):
-        print("changing est")
-        estimate = np.concatenate([np.expand_dims(np.eye(predict.shape[1], predict.shape[1]), axis=0),
-                                   estimate])
+    if estimate is not None:
+        if not check_id(estimate[0]) and len(estimate) != len(predict):
+            print("changing est")
+            estimate = np.concatenate([np.expand_dims(np.eye(predict.shape[1], predict.shape[1]), axis=0),
+                                       estimate])
 
     if estimate_errors is not None:
         if estimate_errors.shape[1] != len(estimate):
             estimate_errors = np.concatenate(
                 [np.expand_dims(np.stack([np.eye( predict.shape[1])] * 2), axis=1),
                  estimate_errors], axis=1)
-    print(estimate_errors.shape)
 
     nsteps, nstates = predict.shape[:2]
-    fig, axes = plt.subplots(nstates, nstates, figsize=(15, 15), sharex=True, sharey=True)
+    fig, axes = plt.subplots(nstates, nstates, figsize=figsize, sharex=True, sharey=True)
     dt_lag = np.arange(nsteps) * lag * dt
     xaxis_marker = np.linspace(0, 1, nsteps)
     padding_between = 0.2
@@ -280,27 +282,38 @@ def plot_cktest(predict: np.ndarray, estimate: np.ndarray,
 
                 estimate_label += "      conf. 95%"
 
-            axes[i, j].plot(dt_lag, predict[:, i, j], ls="--", color=predict_color, label=predict_label)
+            if predict is not None:
+                axes[i, j].plot(dt_lag, predict[:, i, j], ls="--", color=predict_color, label=predict_label)
 
-            axes[i, j].plot(dt_lag, estimate[:, i, j], color=estimate_color, label=estimate_label)
+            if estimate is not None:
+                axes[i, j].plot(dt_lag, estimate[:, i, j], color=estimate_color, label=estimate_label)
 
             axes[i, j].set_ylim(0, 1)
             axes[i, j].text(0.1, 0.55, str(i + 1) + ' ->' + str(j + 1),
-                            transform=axes[i, j].transAxes, weight='bold', size=12)
-            axes[i, j].set_yticks([0, .5, 1], ["0", "0.5", "1"], size=12)
-            axes[i, j].set_xticks(dt_lag[[1, -1]], dt_lag[[1, -1]], )
+                            transform=axes[i, j].transAxes, weight='bold', size=20 * font_scale)
+            axes[i, j].set_yticks([0, .5, 1], ["0", "0.5", "1"], size=20 * font_scale)
+            axes[i, j].set_xticks(dt_lag[[1, -1]], dt_lag[[1, -1]], size=20 * font_scale)
 
     for axi in axes.flat:
         axi.set_xlabel(None)
         axi.set_ylabel(None)
 
-    fig.supxlabel(rf"Lag time, $\tau$ ({unit})", x=0.5, y=.07, size=25)
-    fig.supylabel("Probability", x=.06, y=.5, size=25)
     handels, labels = axes[0, 0].get_legend_handles_labels()
-    fig.legend(handels, labels, ncol=7, loc="upper center", frameon=False, prop={'size': 25})
     plt.subplots_adjust(top=1.0 - padding_top, wspace=padding_between, hspace=padding_between)
+    fig.legend(handels, labels, ncol=7, loc="upper center", frameon=False, prop={'size': 25 * font_scale})
+
     if title is not None:
-        fig.suptitle(title, y=0.98, x=.2, size=35, )
+        fig.suptitle(title, y=0.98, x=.2, size=35 * font_scale, )
+
+    left, bottom = fig.subplotpars.left, fig.subplotpars.bottom
+    # Automatically adjust supxlabel and supylabel just before the tick labels
+    shift = (15 * 0.07) / (figsize[0] / font_scale)
+    fig.supxlabel(rf"Lag time, $\tau$ ({unit})", size=25 * font_scale, y=bottom - shift)
+    fig.supylabel("Probability", size=25 * font_scale, x=left - shift)
+
+    # fig.supxlabel(rf"Lag time, $\tau$ ({unit})",size=25 * font_scale,  x=0.5, y=.07, )
+    # fig.supylabel("Probability",  size=25 * font_scale,x=.06, y=.5,)
+
 
     return
 
