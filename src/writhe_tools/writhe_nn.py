@@ -127,7 +127,7 @@ class TorchWrithe(nn.Module):
         if wr.ndim == 2:  # Case: No extra dimension (scalar sum)
             return self.writhe_edges_(wr)
         else:  # Case: Extra dimension present (vector sum)
-            return torch.stack([self.writhe_edges(i) for i in wr.permute(2, 0, 1)], dim=-1)
+            return torch.stack([self.writhe_edges_(i) for i in wr.permute(2, 0, 1)], dim=-1)
 
     def forward(self, x, return_cross: bool = False):
 
@@ -145,13 +145,15 @@ class TorchWrithe(nn.Module):
 
 
 class AddWritheEdges(nn.Module):
-    def __init__(self, n_atoms=20, n_features=64):
+    def __init__(self, n_atoms=20, n_features=64, add_cross: bool=False):
         super().__init__()
-        self.writhe = TorchWrithe(n_atoms=n_atoms, n_features=n_features)
+        self.writhe = TorchWrithe(n_atoms=n_atoms,
+                                  n_features=n_features)
+        self.add_cross = add_cross
 
-    def forward(self, batch, add_cross: bool=False):
-        if add_cross:
-            wr, vector = self.writhe(batch.x, return_cross=True)
+    def forward(self, batch):
+        if self.add_cross:
+            wr, vector = self.writhe(batch.x, return_cross=self.add_cross)
             batch.writhe, batch.vector = wr, vector
             return batch
         else:
