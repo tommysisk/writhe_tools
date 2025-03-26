@@ -18,10 +18,11 @@ from .utils.indexing import split_list, get_segments
 from .utils.torch_utils import estimate_segment_batch_size, catch_cuda_oom
 from .writhe_nn import writhe_segments
 from .writhe_ray import writhe_segments_ray
-from.writhe_numba import writhe_segments_numba
+from .writhe_numba import writhe_segments_numba
 from .utils.filing import save_dict, load_dict
 from .utils.misc import to_numpy, Timer
 from .stats import window_average, mean
+from .plots import lineplot1D
 
 
 class MplFilter(logging.Filter):
@@ -40,11 +41,10 @@ matplotlib.text._log.addFilter(MplFilter())
 # this computation is written specifically for ray and should not be used otherwise
 
 def calc_writhe_parallel(xyz: np.ndarray,
-                        segments:np.ndarray,
-                        use_cross: bool = True,
-                        cpus_per_job=1,
-                        cpu_method: str="ray"):
-
+                         segments: np.ndarray,
+                         use_cross: bool = True,
+                         cpus_per_job=1,
+                         cpu_method: str = "ray"):
     assert cpu_method in ["ray", "numba"], "method should be 'ray' or 'numba'."
 
     if cpu_method == "ray":
@@ -78,7 +78,6 @@ def calc_writhe_parallel_cuda(xyz: torch.Tensor,
                               use_cross: bool = True,
                               batch_size: int = None,
                               multi_proc: bool = True) -> np.ndarray:
-
     batch_size = estimate_segment_batch_size(xyz) if batch_size is None else batch_size
 
     if batch_size > len(segments):
@@ -214,8 +213,8 @@ class Writhe:
                                        use_cross=use_cross).numpy()
 
     def compute_writhe(self,
-                       length: int=None,
-                       segments: np.ndarray=None,
+                       length: int = None,
+                       segments: np.ndarray = None,
                        matrix: bool = False,
                        store_results: bool = True,
                        xyz: Optional[np.ndarray] = None,
@@ -249,7 +248,6 @@ class Writhe:
         """
         assert (length is None) != (segments is None), ("Must provide either the length or the segments but not both."
                                                         "In general, only the length arg should be set.")
-
 
         assert not all(i is not None for i in (length, segments))
         if xyz is None:
@@ -509,7 +507,13 @@ class Writhe:
     def plot_writhe_total(self,
                           absolute: Optional[bool] = False,
                           window: Optional[int] = None,
-                          ax: Optional[plt.Axes] = None) -> None:
+                          start: int = 0,
+                          stop: int = -1,
+                          indices: np.ndarray = None,
+                          num_xticks: int = 8,
+                          unit: str = None,
+                          **kwargs,
+                          ) -> None:
         """
         Plots the total absolute writhe across time steps.
 
@@ -523,26 +527,32 @@ class Writhe:
         """
 
         self.check_data()
+        features = self.writhe_features[to_numpy(indices).astype(int)] \
+            if indices is not None else self.writhe_features
 
-        writhe_total = np.sum((abs(self.writhe_features) if absolute else self.writhe_features), axis=1)
+        writhe_total = np.sum((abs(features[start, stop]) if absolute else self.writhe_features), axis=1)
+        xticks = np.arange(len(writhe_total))
+        legend = None
 
         if window is not None:
-            data = window_average(x=writhe_total, N=window)
+            writhe_total = window_average(x=writhe_total, N=window)
+            xticks = xticks[:-1 - window + 1] + (window - 1) / 2
             legend = f"Window Averge Size : {window}"
-        else:
-            data = writhe_total
-            legend = None
 
-        if ax is None:
-            fig, ax = plt.subplots(1)
-        ax.plot(data, color="red", label=legend)
-        ax.set_title(f"Total {'Absolute' if absolute else ''} Writhe" + f"\n(Segment Length : {self.length})")
-        ax.set_xlabel("Time Step")
-        ax.set_ylabel("Total Writhe")
+        label_stride = len(xticks) // (num_xticks + 1)
 
-        if legend is not None:
-            ax.legend()
-        pass
+        args = dict(y=writhe_total,
+                    title=f"Total {'Absolute' if absolute else ''} Writhe" + f"\n(Segment Length : {self.length})",
+                    xlabel=f"Time Step ({unit})" if unit is not None else "Time Step",
+                    ylabel="Total Writhe",
+                    label=legend,
+                    xticks=xticks,
+                    label_stride=label_stride,
+                    )
+
+        lineplot1D(**{**args, **kwargs})
+
+        return
 
     def plot_writhe_per_segment(self,
                                 absolute: Optional[bool] = False,

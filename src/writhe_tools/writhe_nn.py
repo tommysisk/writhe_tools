@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
 from .utils.indexing import get_segments, incidence_writhe_edges
-#from torch_scatter import scatter
+
+
+# from torch_scatter import scatter
 
 
 @torch.jit.script
@@ -13,8 +15,7 @@ def divnorm(x: torch.Tensor):
 @torch.jit.script
 def writhe_segments(xyz: torch.Tensor,
                     segments: torch.Tensor,
-                    use_cross: bool = True,
-                    return_cross_: bool = False):
+                    use_cross: bool = True):
     """
     Compute the writhe (signed crossing) of 2 segment pairs for NSegments and all frames (index 0) in xyz
      (xyz can contain just one frame).
@@ -40,43 +41,36 @@ def writhe_segments(xyz: torch.Tensor,
     segments, xyz = segments.unsqueeze(0) if segments.ndim < 2 else segments, \
         xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
 
-    if return_cross_:
-        return torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
-                           xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
-                           dim=-1)
+    dx = divnorm((-xyz[:, segments[:, :2], None]
+                  + xyz[:, segments[:, None, 2:]]
+                  ).reshape(-1, len(segments), 4, 3))
 
+    signs = (torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
+                         xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
+                         dim=-1) * dx[:, :, 0]).sum(-1).sign()
+
+    if use_cross:
+        dx = divnorm(torch.cross(dx[:, :, [0, 1, 3, 2]],
+                                 dx[:, :, [1, 3, 2, 0]],
+                                 dim=-1))
+
+        dx = (dx[:, :, [0, 1, 2, 3]] * dx[:, :, [1, 2, 3, 0]]).sum(-1).clip(-1, 1).arcsin().sum(2)
     else:
+        # compute all dot products, then work with scalars
+        dx = (dx[:, :, [0, 0, 0, 1, 1, 2]] * dx[:, :, [1, 2, 3, 2, 3, 3]]).sum(-1)
+        # get indices; dots is ordered according to indices of 3,3 upper right triangle
+        # we compute dots first because we use each twice
+        u, v, h = [0, 4, 5, 1], \
+            [4, 5, 1, 0], \
+            [2, 3, 2, 3]
+        # surface area from scalars
+        dx = ((dx[:, :, u] * dx[:, :, v] - dx[:, :, h])
 
-        dx = divnorm((-xyz[:, segments[:, :2], None]
-                      + xyz[:, segments[:, None, 2:]]
-                      ).reshape(-1, len(segments), 4, 3))
+              / ((1 - dx[:, :, u] ** 2) * (1 - dx[:, :, v] ** 2)).clamp(min=1e-16).sqrt()
 
-        signs = (torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
-                             xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
-                             dim=-1) * dx[:, :, 0]).sum(-1).sign()
+              ).clip(-1, 1).arcsin().sum(-1)
 
-        if use_cross:
-            dx = divnorm(torch.cross(dx[:, :, [0, 1, 3, 2]],
-                                     dx[:, :, [1, 3, 2, 0]],
-                                     dim=-1))
-
-            dx = (dx[:, :, [0, 1, 2, 3]] * dx[:, :, [1, 2, 3, 0]]).sum(-1).clip(-1, 1).arcsin().sum(2)
-        else:
-            # compute all dot products, then work with scalars
-            dx = (dx[:, :, [0, 0, 0, 1, 1, 2]] * dx[:, :, [1, 2, 3, 2, 3, 3]]).sum(-1)
-            # get indices; dots is ordered according to indices of 3,3 upper right triangle
-            # we compute dots first because we use each twice
-            u, v, h = [0, 4, 5, 1], \
-                      [4, 5, 1, 0], \
-                      [2, 3, 2, 3]
-            # surface area from scalars
-            dx = ((dx[:, :, u] * dx[:, :, v] - dx[:, :, h])
-
-                  / ((1 - dx[:, :, u] ** 2) * (1 - dx[:, :, v] ** 2)).clamp(min=1e-16).sqrt()
-
-                  ).clip(-1, 1).arcsin().sum(-1)
-
-        return torch.squeeze(dx * signs) / (2 * torch.pi)
+    return torch.squeeze(dx * signs) / (2 * torch.pi)
 
 
 class TorchWrithe(nn.Module):
@@ -89,8 +83,17 @@ class TorchWrithe(nn.Module):
         self.register_buffer("n_atoms_", torch.LongTensor([n_atoms]))
         self.register_buffer("n_features_", torch.LongTensor([n_features]))
         self.register_buffer("segments", get_segments(n_atoms, tensor=True))
-        if incidence_edges:
-            self.incidence_edges = True
+        self.incidence_edges = incidence_edges
+
+    @property
+    def incidence_edges(self):
+        return self.incidence_edges_
+
+    @incidence_edges.setter
+    def incidence_edges(self, x):
+        self.incidence_edges_ = x
+        if x and not hasattr(self, "indices"):
+            n_atoms = self.n_atoms
 
             self.register_buffer("indices", torch.unique(incidence_writhe_edges(n_atoms),
                                                          dim=1,
@@ -103,11 +106,9 @@ class TorchWrithe(nn.Module):
             self.register_buffer("sort", torch.einsum("ij,i->j",
                                                       torch.cat([torch.triu_indices(n_atoms, n_atoms, 1),
                                                                  torch.triu_indices(n_atoms, n_atoms, 1).flip(0)],
-                                                                 dim=-1).float(),
+                                                                dim=-1).float(),
                                                       torch.Tensor([n_atoms, 1]).float()
                                                       ).argsort().squeeze())
-        else:
-            self.incidence_edges = False
 
     @property
     def n_atoms(self):
@@ -117,51 +118,69 @@ class TorchWrithe(nn.Module):
     def n_features(self):
         return self.n_features_.item()
 
-    def writhe_edges_(self, wr):
+    def laplacian_(self, wr):
         assert wr.ndim == 2, "arg 'wr' must be 2D"  # Case: No extra dimension (scalar sum)
-        triu = self.zeros.repeat(len(wr), 1).scatter_add_(1, self.indices.repeat(len(wr), 1),
+        triu = self.zeros.repeat(len(wr), 1).scatter_add_(1,
+                                                          self.indices.repeat(len(wr), 1),
                                                           wr.repeat_interleave(4, 1))
+
         return torch.nn.functional.pad(triu, (1, 1), 'constant', 0.0).repeat(1, 2)[:, self.sort]
 
-    def writhe_edges(self, wr):
+    def laplacian(self, wr):
         if wr.ndim == 2:  # Case: No extra dimension (scalar sum)
-            return self.writhe_edges_(wr)
+            return self.laplacian_(wr)
         else:  # Case: Extra dimension present (vector sum)
-            return torch.stack([self.writhe_edges_(i) for i in wr.permute(2, 0, 1)], dim=-1)
+            return torch.stack([self.laplacian_(i) for i in wr.permute(2, 0, 1)], dim=-1)
 
-    def forward(self, x, return_cross: bool = False):
+    def compute_writhe_vector(self, xyz):
+        assert self.segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
+        segments, xyz = self.segments.unsqueeze(0) if self.segments.ndim < 2 else self.segments, \
+            xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
 
-        wr = writhe_segments(xyz=x.reshape(-1, self.n_atoms, 3),
-                             segments=self.segments,
-                             return_cross_=False)
-        if return_cross:
-            wr = [wr, writhe_segments(xyz=x.reshape(-1, self.n_atoms, 3),
-                                      segments=self.segments,
-                                      return_cross_=True)
-                  ]
+        dx = divnorm((-xyz[:, segments[:, :2], None]
+                      + xyz[:, segments[:, None, 2:]]
+                      ).reshape(-1, len(segments), 4, 3))
 
-        return ([self.writhe_edges(i) for i in wr] if self.incidence_edges else wr) if isinstance(wr, list) \
-                  else self.writhe_edges(wr) if self.incidence_edges else wr
+        axial_vector = torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
+                                   xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
+                                   dim=-1)
+        
+        signs = (axial_vector * dx[:, :, 0]).sum(-1).sign()
+
+        dx = divnorm(torch.cross(dx[:, :, [0, 1, 3, 2]],
+                                 dx[:, :, [1, 3, 2, 0]],
+                                 dim=-1))
+
+        dx = (dx[:, :, [0, 1, 2, 3]] * dx[:, :, [1, 2, 3, 0]]).sum(-1).clip(-1, 1).arcsin().sum(2)
+
+        return torch.squeeze(dx * signs) / (2 * torch.pi), axial_vector
+
+    def forward(self, xyz, vector: bool = False):
+
+        if vector:
+            return [self.laplacian(i) if self.incidence_edges else i for i in
+                    self.compute_writhe_vector(xyz=xyz.reshape(-1, self.n_atoms, 3))]
+        else:
+            writhe = writhe_segments(xyz=xyz.reshape(-1, self.n_atoms, 3), segments=self.segments)
+            return self.laplacian(writhe) if self.incidence_edges else writhe
 
 
 class AddWritheEdges(nn.Module):
-    def __init__(self, n_atoms=20, n_features=64, add_cross: bool=False):
+    def __init__(self, n_atoms=20, n_features=64, add_vector: bool = False):
         super().__init__()
         self.writhe = TorchWrithe(n_atoms=n_atoms,
                                   n_features=n_features)
-        self.add_cross = add_cross
+        self.add_vector = add_vector
 
     def forward(self, batch):
-        if self.add_cross:
-            wr, vector = self.writhe(batch.x, return_cross=self.add_cross)
-            batch.writhe, batch.vector = wr, vector
+        if self.add_vector:
+            # noinspection PyCallingNonCallable
+            batch.writhe, batch.vector = self.writhe(batch.x, vector=self.add_vector)
+            # batch.writhe, batch.vector = wr, vector
             return batch
         else:
             batch.writhe = self.writhe(batch.x)
             return batch
-
-
-
 
 # class TorchWrithe(nn.Module):
 #     def __init__(self,
@@ -177,7 +196,7 @@ class AddWritheEdges(nn.Module):
 #         if incidence_edges:
 #             self.incidence_edges = True
 #             self.register_buffer("indices",
-#                                  torch.unique(incidence_writhe_edges(n_atoms),
+#                                  torch.unique(incidence_laplacian(n_atoms),
 #                                               dim=1,
 #                                               return_inverse=True)[-1].unsqueeze(-1)
 #                                  )
@@ -263,7 +282,7 @@ class AddWritheEdges(nn.Module):
 #         segments = get_segments(n_atoms, index0=node_indices, length=segment_length, tensor=True)
 #         # need edges based on the segments the writhe is computed from
 #         edges = torch.cat([segments[:, [0, 2]], segments[:, [1, 3]]]).T if not incidence_edges\
-#                 else incidence_writhe_edges(n_atoms)
+#                 else incidence_laplacian(n_atoms)
 #         # edges = torch.cat([edges, torch.flip(edges, (0,))], dim=1) # this doesn't help
 #
 #         self.register_buffer("edge_indices",

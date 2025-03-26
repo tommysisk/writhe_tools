@@ -329,6 +329,25 @@ def corr(x: np.ndarray, y: np.ndarray):
     return np.sum(np.prod(data, axis=-1), 0) / np.prod(np.linalg.norm(data, axis=0), axis=-1)
 
 
+def acf(x):
+    """
+    Computes the autocorrelation function (ACF) of a 1D time series using FFT.
+
+    Parameters:
+    - x (np.ndarray): Input 1D signal.
+
+    Returns:
+    - acf (np.ndarray): The autocorrelation function.
+    """
+    N = len(x)
+    # Normalize the input (subtract mean, if needed)
+    x = x - np.mean(x)
+    # Compute FFT of the signal
+    # Compute Inverse FFT of the power spectrum
+    # Normalize by variance (pearson correlation)
+    return np.fft.ifft(np.abs(np.fft.fft(x, n=2*N))**2).real[:N] / (N * np.var(x))
+
+
 def rotate_points(x: "target", y: "rotate to target"):
 
     u, s, vt = svd(x.T @ y, full_matrices=False)
