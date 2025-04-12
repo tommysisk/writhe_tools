@@ -1,5 +1,13 @@
+
+from .utils.indexing import (group_by,
+                             sort_indices_list,
+                             reindex_list,
+                             product,
+                             combinations)
+from .utils.misc import optional_import
+scipy = optional_import('scipy', 'stats' )
+
 from typing import List, Union, Any
-from collections import Counter
 from functools import partial
 import warnings
 import multiprocessing
@@ -10,19 +18,11 @@ from scipy import interpolate
 from scipy.optimize import minimize
 from scipy.stats import gaussian_kde
 from scipy.linalg import svd, sqrtm
-import scipy
 import ray
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score, pairwise_distances
 from pyblock.blocking import reblock, find_optimal_block
 import dask.array as da
-
-
-from .utils.indexing import (group_by,
-                             sort_indices_list,
-                             reindex_list,
-                             product,
-                             combinations)
 
 
 def inception_distance(x, y, ax: int = 0):

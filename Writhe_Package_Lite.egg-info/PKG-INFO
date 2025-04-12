@@ -1,7 +1,0 @@
-Metadata-Version: 2.1
-Name: Writhe_Package_Lite
-Version: 1
-Summary: Compute writhe and train Writhe-PaiNN score based generative models with torch
-Home-page: 
-Author: Thomas Sisk
-Author-email: Thomas.r.Sisk.gr@dartmouth.edu

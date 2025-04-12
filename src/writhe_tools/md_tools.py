@@ -1,16 +1,21 @@
+from .utils.misc import to_numpy,optional_import
+md = optional_import("mdtraj", "mdtraj")
+
 import numpy as np
-import mdtraj as md
 import ray
 import warnings
 import multiprocessing
 from .utils.filing import save_dict, load_dict
-from .utils.misc import to_numpy
 from .utils.indexing import (triu_flat_indices,
                             combinations,
                             product,)
 from .utils.sorting import filter_strs, lsdir
 from .plots import plot_distance_matrix, build_grid_plot
 from numba import njit, prange
+
+
+
+
 
 
 @njit

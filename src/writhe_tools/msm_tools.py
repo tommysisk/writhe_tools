@@ -1,10 +1,11 @@
 import numpy as np
 import functools
 import matplotlib.pyplot as plt
-import deeptime
 from .utils.filing import save_dict, load_dict
+from .utils.misc import optional_import
 from .plots import get_color_list
 
+deeptime = optional_import('deeptime', 'stats' )
 
 def reindex_msm(dtrajs: np.ndarray,
                 tmats: np.ndarray = None,

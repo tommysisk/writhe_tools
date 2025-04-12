@@ -7,13 +7,25 @@ from functools import partial
 
 
 def optional_import(package_name, extras=None):
+    """
+    Attempt to import a package. If not found, raise ImportError with styled message.
+
+    Parameters:
+        package_name : str
+            Name to pass to `__import__()`
+        extras : str or list of str, optional
+            Extra install flag(s) for pip, e.g. 'gpu', 'plot'
+    """
+    if isinstance(extras, str):
+        extras = [extras]
     try:
         return __import__(package_name)
     except ImportError:
-        extras_msg = f" with `[{' '.join(extras)}]`" if extras else ""
+        extras_msg = f"[{','.join(extras)}]" if extras else ""
         raise ImportError(
-            f"'{package_name}' is required. Install it via `pip install Writhe_Package_Lite{extras_msg}`."
+            f"[writhe_tools] 👉 To enable this feature, install: pip install writhe-tools{extras_msg}"
         )
+
 
 
 def to_numpy(x: "digit or iterable"):

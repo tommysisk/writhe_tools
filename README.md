@@ -1,5 +1,8 @@
 ## Code accompanying the paper, 'On the application of knot theoretic geometric descriptors to dynamical and generative models'
 
+```bash
+pip install writhe-tools
+```
 
 <p align="center" style="font-size:40px;">
   Computation of the writhe and analysis of polymer coordinate data

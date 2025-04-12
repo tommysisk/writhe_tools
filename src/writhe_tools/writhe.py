@@ -21,7 +21,7 @@ from .writhe_ray import writhe_segments_ray
 from .writhe_numba import writhe_segments_numba
 from .utils.filing import save_dict, load_dict
 from .utils.misc import to_numpy, Timer
-from .stats import window_average, mean
+# from .stats import window_average, mean
 from .plots import lineplot1D
 
 
@@ -39,6 +39,13 @@ matplotlib.text._log.addFilter(MplFilter())
 # Here, we consider the approach at is fastest with ray multiprocessing on CPUs!
 # The more straight forward way of computing the writhe is implemented in writhe_nn,
 # this computation is written specifically for ray and should not be used otherwise
+def mean(x: np.ndarray, weights: np.ndarray = None, ax: int = 0):
+    return x.mean(ax) if weights is None else (weights[:, None] * x).sum(ax) / weights.sum()
+
+def window_average(x, N):
+    cumsum = np.cumsum(np.insert(x, 0, 0))
+    return (cumsum[N:] - cumsum[:-N]) / float(N)
+
 
 def calc_writhe_parallel(xyz: np.ndarray,
                          segments: np.ndarray,
@@ -418,7 +425,7 @@ class Writhe:
         mat = self.writhe_features
 
         if absolute:
-            mat = abs(mat)
+            mat = np.abs(mat)
             cmap = "Reds" if cmap is None else cmap
             cbar_label = "Absolute Writhe"
             norm = None

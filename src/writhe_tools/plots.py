@@ -2,8 +2,52 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
 from itertools import chain
-from .stats import pmf
+#from .stats import pmf
 from typing import Union, Optional, List
+
+
+
+def get_flat_bin_indices_2d(x, y, bins=(10, 10), range=None, out_of_bounds_val=-1):
+    """
+    Return the flattened bin index for each (x, y) pair, using binning identical to np.histogram2d.
+
+    Parameters:
+        x, y               : Arrays of coordinates
+        bins               : Int or (nx, ny) tuple
+        range              : ((xmin, xmax), (ymin, ymax)), optional
+        out_of_bounds_val  : Integer assigned to out-of-bounds values (default: -1)
+
+    Returns:
+        flat_indices       : 1D array of flattened bin indices
+    """
+    x = np.asarray(x)
+    y = np.asarray(y)
+
+    if isinstance(bins, int):
+        bins = (bins, bins)
+
+    # Use the same bin edge computation as np.histogram2d
+    hist_dummy, x_edges, y_edges = np.histogram2d(x, y, bins=bins, range=range)
+
+    # Use searchsorted, like np.histogram2d internally does
+    x_bin = np.searchsorted(x_edges, x, side="right") - 1
+    y_bin = np.searchsorted(y_edges, y, side="right") - 1
+
+    # Clamp points on the right edge (included in last bin per np.histogram2d)
+    x_bin[x == x_edges[-1]] = bins[0] - 1
+    y_bin[y == y_edges[-1]] = bins[1] - 1
+
+    # Create mask for valid points
+    valid = (
+        (x_bin >= 0) & (x_bin < bins[0]) &
+        (y_bin >= 0) & (y_bin < bins[1])
+    )
+
+    # Compute flat bin index
+    flat = np.full_like(x_bin, out_of_bounds_val, dtype=int)
+    flat[valid] = np.ravel_multi_index((x_bin[valid], y_bin[valid]), dims=bins)
+
+    return flat
 
 
 def box_plot(values: np.ndarray,
@@ -493,7 +537,7 @@ def fes2d(x: np.ndarray,
     # ax.set_aspect(aspect=aspect, share=True)
 
     if scatter:
-        c = F.flatten()[pmf([x, y], bins=bins)[2]]
+        c = F.flatten()[get_flat_bin_indices_2d(x, y, bins=bins)]
         # ax1 = ax.twinx().twiny()
         # ax1.set_xticks([])
         # ax1.set_yticks([])
