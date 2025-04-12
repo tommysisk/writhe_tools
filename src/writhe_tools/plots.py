@@ -104,7 +104,7 @@ def annotated_matrix_plot(matrix: np.ndarray,
                           font_scale: float = 1,
                           figsize: float = 20,
                           round_int=False,
-                          alpha: float = 0,
+                          alpha: float = 1,
                           ax=None):
     """
 
@@ -171,6 +171,7 @@ def plot_distance_matrix(matrix: np.ndarray,
                          cbar_label_rotation: float = -90,
                          vmin: float = None,
                          vmax: float = None,
+                         alpha: float = 1,
                          alpha_lines: float = 0,
                          norm: bool = None,
                          aspect: str = None,
@@ -189,6 +190,7 @@ def plot_distance_matrix(matrix: np.ndarray,
 
     s = ax.imshow(matrix, cmap=cmap, aspect=aspect,
                   norm=norm, vmax=vmax, vmin=vmin,
+                  alpha=alpha,
                   )
     ax.set_title(label=title, size=10 * font_scale)
     ax.tick_params(size=3 * font_scale, labelsize=7 * font_scale)
@@ -236,7 +238,10 @@ def plot_distance_matrix(matrix: np.ndarray,
     return s
 
 
-def lineplot1D(x, y,
+def lineplot1D(y,
+               x: np.ndarray = None,
+               y1: np.ndarray = None,
+               y2: np.ndarray = None,
                color: str = None,
                ls: str = None,
                lw: float = None,
@@ -252,30 +257,36 @@ def lineplot1D(x, y,
                ylabel: "list or np.ndarray" = None,
                xticks: "list or np.ndarray" = None,
                yticks: "list or np.ndarray" = None,
-               xticks_rotation: float = 90,
+               xticks_rotation: float = 0,
                yticks_rotation: float = None,
                ymin: float = None,
                ymax: float = None,
                xmin: float = None,
                xmax: float = None,
-               label_stride: int = None,
+               label_stride: int = 1,
                label: str = None,
                font_scale: float = 1,
                hide_title: bool = False,
+               figsize: tuple = None,
+               yscale: str = 'linear',
                ax=None,
                ):
+
     args = locals()
+
+    x = np.arange(len(y)) if x is None else x
+
     n, m = map(len, (y, x))
 
     if ax is None:
-        fig, ax = plt.subplots(1)
+        fig, ax = plt.subplots(1, figsize=figsize)
 
     if hide_title:
         ax.set_title(label="", size=0)
     else:
         ax.set_title(label=title, size=13 * font_scale)
 
-    ax.tick_params(size=3 * font_scale, labelsize=6 * font_scale)
+    ax.tick_params(size=3 * font_scale, labelsize=12 * font_scale)
 
     ax.set_xlabel(xlabel=xlabel, size=12 * font_scale,
                   rotation=xlabel_rotation, )
@@ -295,17 +306,30 @@ def lineplot1D(x, y,
     if label is not None:
         ax.legend()
 
-    if fill_color is not None:
-        ax.fill_between(x, y, color=fill_color, alpha=fill_alpha)
+    if fill_color is not None or all(i is not None for i in (y1, y2)):
+        if all(i is not None for i in (y1, y2)):
+            ax.fill_between(x, y1, y2, color=fill_color, alpha=fill_alpha)
+        else:
+            ax.fill_between(x, y, color=fill_color, alpha=fill_alpha)
+
+    ax.set_yscale(yscale)
 
     for dim, key in zip([m, n], ["xticks", "yticks"]):
         val = args[key]
         if val is not None:
             assert len(val) == dim, f"{key} don't match matrix dimension"
-            loc = np.arange(0, len(val))[::label_stride]
-            val = val[::label_stride]
-            _ = getattr(ax, f"set_{key}")(loc,
-                                          val,
+
+            labels = val[np.linspace(0,
+                                     len(val) - 1,
+                                     (len(val) - 1) // label_stride
+                                     ).astype(int)]
+
+            ticks = np.linspace(0,
+                                len(val) - 1,
+                                len(labels))
+
+            _ = getattr(ax, f"set_{key}")(ticks,
+                                          labels,
                                           rotation=args[f"{key}_rotation"],
                                           )
 

@@ -134,7 +134,7 @@ def std(x: np.ndarray,
             N = weights.sum()
 
         mu = mean(x, weights, ax=ax)
-        return np.sqrt(np.sum(weights[:, None] * (x - mu) ** 2, ax=ax) / N)
+        return np.sqrt(np.sum(weights[:, None] * (x - mu) ** 2, axis=ax) / N)
 
 
 def standardize(x: np.ndarray,
@@ -348,13 +348,13 @@ def acf(x):
     return np.fft.ifft(np.abs(np.fft.fft(x, n=2*N))**2).real[:N] / (N * np.var(x))
 
 
-def rotate_points(x: "target", y: "rotate to target"):
+def rotate_points(x: "target", y: "rotate to target", so3: bool = True):
 
     u, s, vt = svd(x.T @ y, full_matrices=False)
-    sign = np.sign(np.linalg.det(vt.T @ u.T))
     I = np.eye(x.shape[-1])
 
-    if x.shape[-1] >= 3:
+    if so3:
+        sign = np.sign(np.linalg.det(u @ vt))
         I[-1, -1] = sign
 
     R = u @ I @ vt
@@ -408,7 +408,10 @@ def silhouette_scores(data: np.ndarray,
     data: (n_samples, d_features) array of datapoints to be clustered
     k: int or list of int giving the number of clusters
     """
-    distance_matrix = pairwise_distances(data, metric="euclidean", n_jobs=-1 if mult_proc else None)
+    distance_matrix = pairwise_distances(data,
+                                         metric="euclidean",
+                                         n_jobs=-1 if mult_proc else None)
+
     score = lambda k: silhouette_score(distance_matrix,
                                        labels=Kmeans(data, n_clusters=k, n_dim=data.shape[-1])[0],
                                        metric="precomputed").mean()

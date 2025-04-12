@@ -23,8 +23,9 @@ setup(
         ]
     },
     url='',
-    license='MIT',
+    license='GPL-3.0',
     author='Thomas Sisk',
     author_email='Thomas.r.Sisk.gr@dartmouth.edu',
-    description='Compute writhe and train Writhe-PaiNN score based generative models with torch'
+    description=('Algorithms to compute (GPU&CPU) the knot theoretic descriptor, writhe,'
+                 ' from molecular simulation coordinate data')
 )

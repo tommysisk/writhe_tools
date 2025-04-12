@@ -30,6 +30,7 @@ def distance_pair(xyz, pair, length=None):
 def parallel_distances(xyz, pairs, length=None):
     distances = np.zeros((len(pairs),len(xyz)))
     for i in prange(len(pairs)):
+
         distances[i] = distance_pair(xyz, pairs[i], length)
     return distances
 

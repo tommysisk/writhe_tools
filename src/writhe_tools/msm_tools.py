@@ -176,7 +176,7 @@ def plot_its(estimate: np.ndarray, estimate_error=None, n_its: int = None,
     for est_proc, color, _ in zip([estimate[i] for i in range(estimate.shape[0])],
                                   color_list,
                                   range(n_its)):
-        ax.plot(lag_dt, est_proc, label="Estimate", color=color)
+        s=ax.plot(lag_dt, est_proc, label="Estimate", color=color)
         ax.scatter(lag_dt, est_proc, color=color)
     if estimate_error is not None:
         for est_error, color, _ in zip([estimate_error[:, i] for i in range(estimate_error.shape[1])],
@@ -197,7 +197,7 @@ def plot_its(estimate: np.ndarray, estimate_error=None, n_its: int = None,
     ax.tick_params(axis="both", labelsize=5 * font_scale)
     ax.set_title(label=title, size=6 * font_scale)
 
-    return
+    return s
 
 
 def plot_cktest(predict: np.ndarray, estimate: np.ndarray=None,
@@ -515,11 +515,12 @@ class MarkovModel:
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=(10, 5))
 
-        plot_its(estimate=getattr(self, model_type)["its_est"],
-                 n_its=n_its,
-                 title=f"{caps(model_type)} Implied Timescales",
-                 dt=self.dt, lag=self.lag, cmap=cmap,
-                 ax=ax, font_scale=font_scale, yscale=yscale)
+        s=plot_its(estimate=getattr(self, model_type)["its_est"],
+                   n_its=n_its,
+                   title=f"{caps(model_type)} Implied Timescales",
+                   dt=self.dt, lag=self.lag, cmap=cmap,
+                   ax=ax, font_scale=font_scale, yscale=yscale)
+        return s
 
     def cktest(self, model_type,
                predict_color: str = "red"):
