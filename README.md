@@ -103,15 +103,17 @@ f"./writhe_data_dict_length_{self.length}.pkl"
             to avoid data duplication which may cause memory issues.
 
 The results of the writhe calculation are accessible from the class for further analysis and visualization :
+
 ```jupyterpython
 import matplotlib.pyplot as plt
+
 # compute at length 5
 writhe.compute_writhe(length=5)
 fig, axes = plt.subplots(1, 2, figsize=(14, 3))
-ax=axes.flat
-writhe.plot_writhe_matrix(index=None, ax=ax[0], label_stride=8) #xticks=residues, yticks=residues, to match example
-writhe.plot_writhe_total(ax=ax[1], window=250)
-ax[1].hlines(0,0,len(xyz), ls="--", color="gray")
+ax = axes.flat
+writhe.plot_writhe_matrix(index=None, ax=ax[0], label_stride=8)  #xticks=residues, yticks=residues, to match example
+writhe.plot_writhe_total(window=250, ax=ax[1])
+ax[1].hlines(0, 0, len(xyz), ls="--", color="gray")
 fig.tight_layout()
 
 ```
@@ -200,51 +202,47 @@ If `speed_test=True`, the function **returns `None`** and doesn't store results.
 
 
 The class also has plotting methods with many options
+
 ```jupyterpython
 writhe.plot_writhe_matrix(
-                                 # (Averages the writhe matrix across frames by default)
-    index=None,                   # index: Optional[Union[int, List[int], str, np.ndarray]] = None
-                                 # (Plots the average writhe matrix if index is None)
-    absolute=False,               # absolute: bool = False
-                                 # (Uses signed writhe values by default)
-    xlabel=None,                  # xlabel: Optional[str] = None
-                                 # (No custom label for the x-axis, default will be used)
-    ylabel=None,                  # ylabel: Optional[str] = None
-                                 # (No custom label for the y-axis, default will be used)
-    xticks=None,                  # xticks: Optional[np.ndarray] = None
-                                 # (No custom xticks provided, default will be used)
-    yticks=None,                  # yticks: Optional[np.ndarray] = None
-                                 # (No custom yticks provided, default will be used)
-    label_stride=5,               # label_stride: int = 5
-                                 # (Tick labels will be spaced every 5 units by default)
-    dscr=None,                    # dscr: Optional[str] = None
-                                 # (No description for the subset of frames averaged)
-    font_scale=1,                 # font_scale: float = 1
-                                 # (Font size will be at the default scale)
-    ax=None                       # ax: Optional[plt.Axes] = None
-                                 # (No custom Axes object provided, so a new figure will be created)
+    # (Averages the writhe matrix across frames by default)
+    index=None,  # index: Optional[Union[int, List[int], str, np.ndarray]] = None
+    # (Plots the average writhe matrix if index is None)
+    absolute=False,  # absolute: bool = False
+    # (Uses signed writhe values by default)
+    xlabel=None,  # xlabel: Optional[str] = None
+    # (No custom label for the x-axis, default will be used)
+    ylabel=None,  # ylabel: Optional[str] = None
+    # (No custom label for the y-axis, default will be used)
+    xticks=None,  # xticks: Optional[np.ndarray] = None
+    # (No custom xticks provided, default will be used)
+    yticks=None,  # yticks: Optional[np.ndarray] = None
+    # (No custom yticks provided, default will be used)
+    label_stride=5,  # label_stride: int = 5
+    # (Tick labels will be spaced every 5 units by default)
+    dscr=None,  # dscr: Optional[str] = None
+    # (No description for the subset of frames averaged)
+    font_scale=1,  # font_scale: float = 1
+    # (Font size will be at the default scale)
+    ax=None  # ax: Optional[plt.Axes] = None
+    # (No custom Axes object provided, so a new figure will be created)
 )
 
 writhe.plot_writhe_per_segment(
-                                  # (Averages over all frames by default)
-    index=None,                    # index: Optional[Union[int, List[int], str, np.ndarray]] = None
-                                  # (Plots the average writhe per segment if index is None)
-    xticks=None,                   # xticks: Optional[List[str]] = None
-                                  # (No custom xticks are provided; default range is used)
-    label_stride=5,                # label_stride: int = 5
-                                  # (Tick labels are spaced every 5 segments by default)
-    dscr=None,                     # dscr: Optional[str] = None
-                                  # (No description for the averaged indices)
-    ax=None                        # ax: Optional[plt.Axes] = None
-                                  # (No custom Axes object provided; a new figure will be created)
+    # (Averages over all frames by default)
+    index=None,  # index: Optional[Union[int, List[int], str, np.ndarray]] = None
+    # (Plots the average writhe per segment if index is None)
+    xticks=None,  # xticks: Optional[List[str]] = None
+    # (No custom xticks are provided; default range is used)
+    label_stride=5,  # label_stride: int = 5
+    # (Tick labels are spaced every 5 segments by default)
+    dscr=None,  # dscr: Optional[str] = None
+    # (No description for the averaged indices)
+    ax=None  # ax: Optional[plt.Axes] = None
+    # (No custom Axes object provided; a new figure will be created)
 )
 
-self.plot_writhe_total(
-    window=None,           # window: Optional[int] = None
-                           # (No window averaging applied; raw data is used)
-    ax=None                # ax: Optional[plt.Axes] = None
-                           # (No custom Axes object provided; a new figure will be created)
-)
+self.plot_writhe_total(window=None, ax=None)
 
 ```
 

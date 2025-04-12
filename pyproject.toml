@@ -9,7 +9,7 @@ description = "Compute writhe and train Writhe-PaiNN score based generative mode
 authors = [
     { name = "Thomas Sisk", email = "Thomas.r.Sisk.gr@dartmouth.edu" }
 ]
-license = { text = "MIT" }
+license = {text = "GPL-3.0-only"}
 readme = "README.md"
 requires-python = ">=3.7, <3.11"
 dependencies = [
