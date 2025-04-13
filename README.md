@@ -1,12 +1,10 @@
-## Code accompanying the paper, 'On the application of knot theoretic geometric descriptors to dynamical and generative models'
-
 ```bash
 pip install writhe-tools
 ```
 
-<p align="center" style="font-size:40px;">
-  Computation of the writhe and analysis of polymer coordinate data
-</p>
+##### Accompanying the paper:
+'Characterizing the kinetic and structural ensembles of intrinsically disordered proteins using writhe' By Thomas Sisk, Simon Olsson and Paul Robustelli.
+INSERT OUR ARCHIVE LINK
 
 
 <p align="center">
@@ -18,15 +16,25 @@ pip install writhe-tools
 
 
 
-The package contains the following ...
+The package contains the following:
 
 - Numerical routines for computing the writhe using CPU or GPU devices. In either case, computations are (optionally) parallelized over CPU / GPU cores / devices.
 - A class architecture for writhe computation and visualization. 
-- An implementation of the novel writhe-based graph attention message passing layer.
-- An implementation of the SE3 equivariant, writhe-PaiNN neural network architecture where SE3 equivariance is acheived by only augmenting invariant graph features.
-- Implementations of the orginial PaiNN architecture and the cPaiNN achitecture for comparison.
-- An implementation of a score based diffusion model to train all architectures.
-- Classes to compute (time-lagged) canonical correlation analysis and visualize results.
+- A torch writhe-based neural network layer that computes pair-wise SE(3) scalar and vector features between nodes/atoms of a graph/molecule using the writhe 'graph Laplacian' described in the accompanying manuscript.
+
+Optional installations:
+
+```bash
+pip install writhe-tools[stats]
+```
+
+- Installs additional dependencies to:
+    - compute tCCA via ```writhe_tools.tcca.tCCA```
+    - helper functions to perform common tasks in MSMs estimation via
+      - ```writhe_tools.stats```
+      - ```writhe_tools.msm_tools```
+
+- 
 
 
 #### For an example of how to use this package to analyze molecular dynamics simulation data, see analysis_example.ipynb in the examples' folder and the mini tutorial below
