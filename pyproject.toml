@@ -56,6 +56,6 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 [project.urls]
-Homepage=
+Homepage='https://github.com/tommysisk/Writhe_Paper'
 
 
