@@ -543,7 +543,7 @@ class Writhe:
 
         if window is not None:
             writhe_total = window_average(x=writhe_total, N=window)
-            xticks = xticks[:-1 - window + 1] + (window - 1) / 2
+            xticks = window_average(x=xticks, N=window).round(1)#xticks[:-1 - window + 1] + (window - 1) / 2
             legend = f"Window Averge Size : {window}"
 
         label_stride = len(xticks) // (num_xticks + 1)

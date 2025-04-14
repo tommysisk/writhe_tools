@@ -45,10 +45,6 @@ pip install writhe-tools[stats]
 
 #### To train score-based generative models with any of the architectures listed above, see the scripts folder.
 
-
-
-![Alt text](./images/writhe_layer.png)
-
 ---
 
 ## The main tool in this package is the class:
