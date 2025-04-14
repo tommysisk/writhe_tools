@@ -22,7 +22,7 @@ Python 3.11 and above are not currently supported due to upstream compatibility 
 
 ---
 
-### Optional installations:
+### Simple installation:
 
 ```bash
 pip install writhe-tools
