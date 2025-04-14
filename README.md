@@ -1,6 +1,3 @@
-```bash
-pip install writhe-tools
-```
 
 ##### Accompanying the paper:
 'Characterizing the kinetic and structural ensembles of intrinsically disordered proteins using writhe' By Thomas Sisk, Simon Olsson and Paul Robustelli.
@@ -23,6 +20,13 @@ The package contains the following:
 **Supported Python versions:** 3.7 – 3.10  
 Python 3.11 and above are not currently supported due to upstream compatibility constraints in `numba` and `ray`.
 
+---
+
+### Optional installations:
+
+```bash
+pip install writhe-tools
+```
 ---
 
 ### Optional installations:
