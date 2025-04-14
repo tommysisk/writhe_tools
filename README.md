@@ -8,8 +8,8 @@ INSERT OUR ARCHIVE LINK
 
 
 <p align="center">
-  <img src="./images/visualize_writhe.png" width="410"/>
-  <img src="./images/writhe_asyn.png" width="410"/>
+  <img src="https://github.com/paulrobustelli/Sisk_IDP_Writhe_2025/blob/main/images/visualize_writhe.png" width="410"/>
+  <img src="https://github.com/paulrobustelli/Sisk_IDP_Writhe_2025/blob/main/images/writhe_asyn.png" width="410"/>
 </p>
 
 
@@ -26,44 +26,6 @@ Python 3.11 and above are not currently supported due to upstream compatibility 
 ---
 
 ### Optional installations:
-
-```bash
-pip install writhe-tools[stats]
-```
-
-- Installs additional dependencies to:
-    - compute tCCA via ```writhe_tools.tcca.tCCA```
-    - helper functions to perform common tasks in MSM estimation via:
-        - ```writhe_tools.stats```
-        - ```writhe_tools.msm_tools```
-
-```bash
-pip install writhe-tools[graph]
-```
-
-- Installs dependencies to:
-    - train writhe-based neural networks on molecular graphs
-    - includes:
-        - ```writhe_tools.nn_tools``` for equivariant message passing and training utilities
-    - dependencies include `torch-geometric`, `pytorch_lightning`, and `tensorboard`
-
-```bash
-pip install writhe-tools[mdtraj]
-```
-
-- Installs `mdtraj` to enable trajectory and structure file loading
-- Provides access to a set of analysis tools in:
-    - ```writhe_tools.md_tools```
-
-```bash
-pip install writhe-tools[dev]
-```
-
-- Installs developer tools to:
-    - run tests
-    - check code formatting
-    - includes:
-        - `pytest`, `black`, and `flake8`
 
 ```bash
 pip install writhe-tools[cuda11]
@@ -90,16 +52,47 @@ pip install writhe-tools[cuda11_graph]
     - ```writhe_tools.nn_tools```
     - `torch-geometric`, `pytorch_lightning`, and `tensorboard`
 
+
+```bash
+pip install writhe-tools[stats]
+```
+
+- Installs additional dependencies to:
+    - compute tCCA via ```writhe_tools.tcca.tCCA```
+    - helper functions to perform common tasks in MSM estimation via:
+        - ```writhe_tools.stats```
+        - ```writhe_tools.msm_tools```
+
+```bash
+pip install writhe-tools[cuda11_graph]
+```
+
+- Installs everything in `[cuda11]` along with graph-related dependencies
+- Enables training of writhe-based neural networks on systems using CUDA 11.x
+- Includes tools like:
+    - ```writhe_tools.nn_tools```
+    - `torch-geometric`, `pytorch_lightning`, and `tensorboard`
+
+```bash
+pip install writhe-tools[graph]
+```
+
+- Installs dependencies to:
+    - train writhe-based neural networks on molecular graphs (see scripts)
+    - dependencies include `torch-geometric`, `pytorch_lightning`, and `tensorboard`
+
+```bash
+pip install writhe-tools[mdtraj]
+```
+
+- Installs `mdtraj` to enable trajectory and structure file loading
+- Provides access to a set of analysis tools in:
+    - ```writhe_tools.md_tools```
+
+
 ---
 
-
-#### For an example of how to use this package to analyze molecular dynamics simulation data, see analysis_example.ipynb in the examples' folder and the mini tutorial below
-
-
-
-
-
-#### To train score-based generative models with any of the architectures listed above, see the scripts folder.
+#### To train score-based generative models using our writhe-base SE(3) equivariant messaging passing neural network 👉 [`scripts/`](./scripts/)
 
 ---
 
