@@ -13,41 +13,65 @@ license = {text = "GPL-3.0-only"}
 readme = "README.md"
 requires-python = ">=3.7, <3.11"
 dependencies = [
-    "numpy",  # Allow updates within major version 1.x
-    "ray>=2.5.1",      # Allow updates within major version 2.x
-    "matplotlib>=3.5.1",  # Allow updates within major version 3.x
-    "torch>=2.0.1",  # Allow minor updates but restrict major changes
-    "numpy_indexed>=0.3.7", # Allow updates within major version 0.x
-    "joblib>=1.1.0",   # Allow updates within major version 1.x
-     "numba>=0.55.0",# Allow updates within major version 2.x
-                ]
+    "numpy",
+    "ray>=2.5.1",
+    "matplotlib>=3.5.1",
+    "torch>=2.0.1",
+    "numpy_indexed>=0.3.7",
+    "joblib>=1.1.0",
+    "numba>=0.55.0"
+]
 
 [project.optional-dependencies]
+cuda11 = [
+    "numpy>=1.22.4,<2.0",
+    "ray>=2.5.1,<3.0",
+    "matplotlib>=3.5.1,<4.0",
+    "torch>=2.0.1,<2.1.0",
+    "numpy_indexed>=0.3.7,<1.0",
+    "joblib>=1.1.0,<2.0",
+    "numba>=0.55.0,<0.61.0",
+    ]
+
+cuda11_graph = [
+    "numpy>=1.22.4,<2.0",
+    "ray>=2.5.1,<3.0",
+    "matplotlib>=3.5.1,<4.0",
+    "torch>=2.0.1,<2.1.0",
+    "numpy_indexed>=0.3.7,<1.0",
+    "joblib>=1.1.0,<2.0",
+    "numba>=0.55.0,<0.61.0",
+    "tqdm>=4.63.0,<5.0",
+    "pytorch_lightning<=2.0.9.post0",
+    "torch-geometric>=2.3.1,<3.0",
+    "tensorboard>=2.13.0,<3.0",
+
+]
 
 graph = [
     "torch-geometric>=2.3.1,<3.0",
-    "tensorboard>=2.13.0,<3.0", # Allow updates within major version 2.x
-    "torch-scatter>=2.1.1,<3.0",   # Allow updates within major version 2.x
-    "pytorch_lightning>=2.0.9.post0,<3.0", # Allow updates within major version 2.x
-    "tqdm>=4.63.0,<5.0",    # Allow updates within major version 4.x
-        ]
+    "tensorboard>=2.13.0,<3.0",
+    "torch-scatter>=2.1.1,<3.0",
+    "pytorch_lightning>=2.0.9.post0,<3.0",
+    "tqdm>=4.63.0,<5.0"
+]
 
 mdtraj = [
-    "mdtraj>=1.9.5,<2.0",
-         ]
+    "mdtraj>=1.9.5,<2.0"
+]
 
 stats = [
     "pyblock>=0.6,<1.0",
     "dask>=2022.2.1,<2024.0.0",
     "deeptime>=0.4.1,<1.0",
-    'scipy>=1.9.0',
-    'scikit-learn>=1.5.0',
-        ]
+    "scipy>=1.9.0",
+    "scikit-learn>=1.5.0"
+]
 
 dev = [
-    "pytest>=6.0.0,<8.0.0",  # Allow updates within major version 6.x to 7.x
-    "black>=22.0.0,<24.0.0",  # Allow updates until 2024 major changes
-    "flake8>=4.0.0,<6.0.0"    # Allow updates within major version 4.x to 5.x
+    "pytest>=6.0.0,<8.0.0",
+    "black>=22.0.0,<24.0.0",
+    "flake8>=4.0.0,<6.0.0"
 ]
 
 [tool.setuptools]
@@ -55,7 +79,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
 [project.urls]
-Homepage='https://github.com/tommysisk/Writhe_Paper'
-
-
+Homepage = "https://github.com/tommysisk/Writhe_Paper"
