@@ -46,6 +46,8 @@ pip install writhe-tools[cuda11]
   pip install torch==2.0.1+cu117 --index-url https://download.pytorch.org/whl/cu117
   ```
 
+---
+
 ```bash
 pip install writhe-tools[cuda11_graph]
 ```
@@ -56,6 +58,7 @@ pip install writhe-tools[cuda11_graph]
     - ```writhe_tools.nn_tools```
     - `torch-geometric`, `pytorch_lightning`, and `tensorboard`
 
+---
 
 ```bash
 pip install writhe-tools[stats]
@@ -67,6 +70,8 @@ pip install writhe-tools[stats]
         - ```writhe_tools.stats```
         - ```writhe_tools.msm_tools```
 
+---
+
 ```bash
 pip install writhe-tools[cuda11_graph]
 ```
@@ -77,6 +82,8 @@ pip install writhe-tools[cuda11_graph]
     - ```writhe_tools.nn_tools```
     - `torch-geometric`, `pytorch_lightning`, and `tensorboard`
 
+---
+
 ```bash
 pip install writhe-tools[graph]
 ```
@@ -84,6 +91,8 @@ pip install writhe-tools[graph]
 - Installs dependencies to:
     - train writhe-based neural networks on molecular graphs (see scripts)
     - dependencies include `torch-geometric`, `pytorch_lightning`, and `tensorboard`
+
+---
 
 ```bash
 pip install writhe-tools[mdtraj]
@@ -177,8 +186,11 @@ ax[1].hlines(0, 0, len(xyz), ls="--", color="gray")
 fig.tight_layout()
 
 ```
-![Alt text](./images/writhe_example_plot.png)
+![Alt text](https://github.com/paulrobustelli/Sisk_IDP_Writhe_2025/blob/main/images/writhe_example_plot.png)
 
+---
+
+Further analysis, such as time-lagged canonical correlation analysis and VAMP-2 scoring, can be performed as follows -
 ```jupyterpython
 from writhe_tools.tcca import tCCA
 from writhe_tools.plots import fes2d
