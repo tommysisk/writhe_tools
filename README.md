@@ -4,10 +4,8 @@
 INSERT OUR ARCHIVE LINK
 
 
-<p align="center">
-  <img src="https://github.com/paulrobustelli/Sisk_IDP_Writhe_2025/blob/main/images/visualize_writhe.png" width="410"/>
-  <img src="https://github.com/paulrobustelli/Sisk_IDP_Writhe_2025/blob/main/images/writhe_asyn.png" width="410"/>
-</p>
+| ![](https://raw.githubusercontent.com/paulrobustelli/Sisk_IDP_Writhe_2025/main/images/visualize_writhe.png) | ![](https://raw.githubusercontent.com/paulrobustelli/Sisk_IDP_Writhe_2025/main/images/writhe_asyn.png) |
+|:--:|:--:|
 
 
 
@@ -48,17 +46,6 @@ pip install writhe-tools[cuda11]
 
 ---
 
-```bash
-pip install writhe-tools[cuda11_graph]
-```
-
-- Installs everything in `[cuda11]` along with graph-related dependencies
-- Enables training of writhe-based neural networks on systems using CUDA 11.x
-- Includes tools like:
-    - ```writhe_tools.nn_tools```
-    - `torch-geometric`, `pytorch_lightning`, and `tensorboard`
-
----
 
 ```bash
 pip install writhe-tools[stats]
@@ -78,8 +65,7 @@ pip install writhe-tools[cuda11_graph]
 
 - Installs everything in `[cuda11]` along with graph-related dependencies
 - Enables training of writhe-based neural networks on systems using CUDA 11.x
-- Includes tools like:
-    - ```writhe_tools.nn_tools```
+- Dependencies include version constrained:
     - `torch-geometric`, `pytorch_lightning`, and `tensorboard`
 
 ---
@@ -89,8 +75,8 @@ pip install writhe-tools[graph]
 ```
 
 - Installs dependencies to:
-    - train writhe-based neural networks on molecular graphs (see scripts)
-    - dependencies include `torch-geometric`, `pytorch_lightning`, and `tensorboard`
+    - Enables training of writhe-based neural networks without constraining CUDA to 11.x
+    - Dependencies include unconstrained versions `torch-geometric`, `pytorch_lightning`, and `tensorboard`
 
 ---
 
@@ -186,11 +172,11 @@ ax[1].hlines(0, 0, len(xyz), ls="--", color="gray")
 fig.tight_layout()
 
 ```
-![Alt text](https://github.com/paulrobustelli/Sisk_IDP_Writhe_2025/blob/main/images/writhe_example_plot.png)
+![](https://raw.githubusercontent.com/paulrobustelli/Sisk_IDP_Writhe_2025/main/images/writhe_example_plot.png)
 
 ---
 
-Further analysis, such as time-lagged canonical correlation analysis and VAMP-2 scoring, can be performed as follows -
+Further analysis, such as time-lagged canonical correlation analysis and VAMP-2 scoring, can be performed as follows
 ```jupyterpython
 from writhe_tools.tcca import tCCA
 from writhe_tools.plots import fes2d
@@ -199,30 +185,32 @@ print(f"VAMP2 Score (dim 10) : {(tcca.svals[:10]**2).sum()}")
 projection = tcca.transform(dim=2, scale=False)
 fes2d(projection)
 ```
+---
 
-
+#### Documentation
 
 ## `Writhe.compute_writhe`
 ### **Description**
 `compute_writhe` is a method of the `Writhe` class that computes the writhe for a given segment length between all segments using **parallel computation** on **CPU (Ray or Numba)** or **GPU (CUDA)**.
-
 ### **Method Signature**
 ```python
-def compute_writhe(self,
-                   length: Optional[int] = None,
-                   segments: Optional[np.ndarray] = None,
-                   matrix: bool = False,
-                   store_results: bool = True,
-                   xyz: Optional[np.ndarray] = None,
-                   n_points: Optional[int] = None,
-                   speed_test: bool = False,
-                   cpus_per_job: int = 1,
-                   cuda: bool = False,
-                   cuda_batch_size: Optional[int] = None,
-                   multi_proc: bool = True,
-                   use_cross: bool = True,
-                   cpu_method: str = "ray"
-                   ) -> Optional[dict]:
+from writhe_tools.writhe import Writhe
+writhe = Writhe(xyz=xyz) # xyz = np.ndarray with shape (samples, atoms, 3)
+writhe.compute_writhe(self,
+                      length: Optional[int] = None,
+                      segments: Optional[np.ndarray] = None,
+                      matrix: Optional[bool] = False,
+                      store_results: Optional[bool] = True,
+                      xyz: Optional[np.ndarray] = None,
+                      n_points: Optional[int] = None,
+                      speed_test: Optional[bool] = False,
+                      cpus_per_job: Optional[int] = 1,
+                      cuda: bool = Optional[bool],
+                      cuda_batch_size: Optional[int] = None,
+                      multi_proc: Optional[bool] = True,
+                      use_cross: Optional[bool] = True,
+                      cpu_method: Optional[str] = "ray"
+                      ) -> Optional[dict]:
 ```
 
 
