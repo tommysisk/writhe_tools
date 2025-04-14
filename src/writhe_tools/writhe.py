@@ -519,6 +519,7 @@ class Writhe:
                           indices: np.ndarray = None,
                           num_xticks: int = 8,
                           unit: str = None,
+                          font_scale: float = 1,
                           **kwargs,
                           ) -> None:
         """
@@ -543,7 +544,7 @@ class Writhe:
 
         if window is not None:
             writhe_total = window_average(x=writhe_total, N=window)
-            xticks = window_average(x=xticks, N=window).round(1)#xticks[:-1 - window + 1] + (window - 1) / 2
+            xticks = window_average(x=xticks, N=window).round()#xticks[:-1 - window + 1] + (window - 1) / 2
             legend = f"Window Averge Size : {window}"
 
         label_stride = len(xticks) // (num_xticks + 1)
@@ -555,6 +556,7 @@ class Writhe:
                     label=legend,
                     xticks=xticks,
                     label_stride=label_stride,
+                    font_scale=font_scale
                     )
 
         lineplot1D(**{**args, **kwargs})
