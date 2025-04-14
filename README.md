@@ -14,15 +14,18 @@ INSERT OUR ARCHIVE LINK
 
 
 
-
-
 The package contains the following:
 
 - Numerical routines for computing the writhe using CPU or GPU devices. In either case, computations are (optionally) parallelized over CPU / GPU cores / devices.
 - A class architecture for writhe computation and visualization. 
 - A torch writhe-based neural network layer that computes pair-wise SE(3) scalar and vector features between nodes/atoms of a graph/molecule using the writhe 'graph Laplacian' described in the accompanying manuscript.
 
-Optional installations:
+**Supported Python versions:** 3.7 – 3.10  
+Python 3.11 and above are not currently supported due to upstream compatibility constraints in `numba` and `ray`.
+
+---
+
+### Optional installations:
 
 ```bash
 pip install writhe-tools[stats]
@@ -30,11 +33,64 @@ pip install writhe-tools[stats]
 
 - Installs additional dependencies to:
     - compute tCCA via ```writhe_tools.tcca.tCCA```
-    - helper functions to perform common tasks in MSMs estimation via
-      - ```writhe_tools.stats```
-      - ```writhe_tools.msm_tools```
+    - helper functions to perform common tasks in MSM estimation via:
+        - ```writhe_tools.stats```
+        - ```writhe_tools.msm_tools```
 
-- 
+```bash
+pip install writhe-tools[graph]
+```
+
+- Installs dependencies to:
+    - train writhe-based neural networks on molecular graphs
+    - includes:
+        - ```writhe_tools.nn_tools``` for equivariant message passing and training utilities
+    - dependencies include `torch-geometric`, `pytorch_lightning`, and `tensorboard`
+
+```bash
+pip install writhe-tools[mdtraj]
+```
+
+- Installs `mdtraj` to enable trajectory and structure file loading
+- Provides access to a set of analysis tools in:
+    - ```writhe_tools.md_tools```
+
+```bash
+pip install writhe-tools[dev]
+```
+
+- Installs developer tools to:
+    - run tests
+    - check code formatting
+    - includes:
+        - `pytest`, `black`, and `flake8`
+
+```bash
+pip install writhe-tools[cuda11]
+```
+
+- Installs versions of core dependencies tested with older CUDA 11.x environments
+- Uses version bounds such as:
+    - `torch >=2.0.1, <2.1.0`
+    - `numba <0.61.0`
+    - `numpy <2.0`
+- Compatible with manually installed CUDA-enabled versions of `torch`
+- If needed, install `torch` separately using:
+  ```bash
+  pip install torch==2.0.1+cu117 --index-url https://download.pytorch.org/whl/cu117
+  ```
+
+```bash
+pip install writhe-tools[cuda11_graph]
+```
+
+- Installs everything in `[cuda11]` along with graph-related dependencies
+- Enables training of writhe-based neural networks on systems using CUDA 11.x
+- Includes tools like:
+    - ```writhe_tools.nn_tools```
+    - `torch-geometric`, `pytorch_lightning`, and `tensorboard`
+
+---
 
 
 #### For an example of how to use this package to analyze molecular dynamics simulation data, see analysis_example.ipynb in the examples' folder and the mini tutorial below

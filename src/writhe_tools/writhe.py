@@ -514,12 +514,16 @@ class Writhe:
     def plot_writhe_total(self,
                           absolute: Optional[bool] = False,
                           window: Optional[int] = None,
+                          color: Optional[str] = 'indianred',
                           start: int = 0,
                           stop: int = -1,
                           indices: np.ndarray = None,
                           num_xticks: int = 8,
                           unit: str = None,
                           font_scale: float = 1,
+                          xticks: np.ndarray = None,
+                          x_magnitude: int = -3,
+                          xlabel: str = None,
                           **kwargs,
                           ) -> None:
         """
@@ -539,24 +543,28 @@ class Writhe:
             if indices is not None else self.writhe_features
 
         writhe_total = np.sum((abs(features[start, stop]) if absolute else self.writhe_features), axis=1)
-        xticks = np.arange(len(writhe_total))
+        xticks = np.arange(len(writhe_total)) * 10 ** x_magnitude if xticks is None else xticks
         legend = None
 
         if window is not None:
             writhe_total = window_average(x=writhe_total, N=window)
-            xticks = window_average(x=xticks, N=window).round()#xticks[:-1 - window + 1] + (window - 1) / 2
-            legend = f"Window Averge Size : {window}"
+            xticks = np.linspace(0, xticks[-window], len(writhe_total)).astype(int)#xticks[:-1 - window + 1] + (window - 1) / 2
+            legend = f"Window Average Size : {window}"
 
         label_stride = len(xticks) // (num_xticks + 1)
-
+        if xlabel is None:
+            xlabel=f"Time Step ({unit})" if unit is not None else "Time Step"
+            xlabel = xlabel + "\u2219" + fr"$10^{{{x_magnitude}}}$" if x_magnitude is not None and unit is None else xlabel
         args = dict(y=writhe_total,
                     title=f"Total {'Absolute' if absolute else ''} Writhe" + f"\n(Segment Length : {self.length})",
-                    xlabel=f"Time Step ({unit})" if unit is not None else "Time Step",
+                    xlabel=xlabel,
                     ylabel="Total Writhe",
                     label=legend,
                     xticks=xticks,
                     label_stride=label_stride,
-                    font_scale=font_scale
+                    font_scale=font_scale,
+                    ylabel_rotation=90,
+                    color=color,
                     )
 
         lineplot1D(**{**args, **kwargs})
@@ -565,6 +573,7 @@ class Writhe:
 
     def plot_writhe_per_segment(self,
                                 absolute: Optional[bool] = False,
+                                color: Optional[str] = 'indianred',
                                 index: Optional[Union[int, List[int], str, np.ndarray]] = None,
                                 xticks: Optional[List[str]] = None,
                                 label_stride: int = 5,
@@ -617,7 +626,7 @@ class Writhe:
 
         if ax is None:
             fig, ax = plt.subplots(1)
-        ax.plot(data, color="red")
+        ax.plot(data, color=color)
         ax.set_title(title + f"\n(Segment Length : {self.length})")
         ax.set_xlabel("Residue")
         ax.set_ylabel("Total Writhe")
