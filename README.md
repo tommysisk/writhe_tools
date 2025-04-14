@@ -186,8 +186,11 @@ ax[1].hlines(0, 0, len(xyz), ls="--", color="gray")
 fig.tight_layout()
 
 ```
-![Alt text](./images/writhe_example_plot.png)
+![Alt text](https://github.com/paulrobustelli/Sisk_IDP_Writhe_2025/blob/main/images/writhe_example_plot.png)
 
+---
+
+Further analysis, such as time-lagged canonical correlation analysis and VAMP-2 scoring, can be performed as follows -
 ```jupyterpython
 from writhe_tools.tcca import tCCA
 from writhe_tools.plots import fes2d

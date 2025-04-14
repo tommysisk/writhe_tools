@@ -522,7 +522,7 @@ class Writhe:
                           unit: str = None,
                           font_scale: float = 1,
                           xticks: np.ndarray = None,
-                          x_magnitude: int = -3,
+                          x_magnitude: int = 0,
                           xlabel: str = None,
                           **kwargs,
                           ) -> None:
