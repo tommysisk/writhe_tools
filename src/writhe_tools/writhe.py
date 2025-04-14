@@ -554,7 +554,7 @@ class Writhe:
         label_stride = len(xticks) // (num_xticks + 1)
         if xlabel is None:
             xlabel=f"Time Step ({unit})" if unit is not None else "Time Step"
-            xlabel = xlabel + "\u2219" + fr"$10^{{{x_magnitude}}}$" if x_magnitude is not None and unit is None else xlabel
+            xlabel = xlabel + "\u2219" + fr"$10^{{{x_magnitude}}}$" if x_magnitude != 0 and unit is None else xlabel
         args = dict(y=writhe_total,
                     title=f"Total {'Absolute' if absolute else ''} Writhe" + f"\n(Segment Length : {self.length})",
                     xlabel=xlabel,

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "writhe_tools"
-version = "0.0.7"
+version = "0.0.15"
 description = "A high-performance Python package for computing the geometric descriptor writhe from 3D coordinate data."
 authors = [
     { name = "Thomas Sisk", email = "Thomas.r.Sisk.gr@dartmouth.edu" }
@@ -13,7 +13,7 @@ license = {text = "GPL-3.0-only"}
 readme = "README.md"
 requires-python = ">=3.7, <3.11"
 dependencies = [
-    "numpy",
+    "numpy>=1.22.4,<2.0",
     "ray>=2.5.1",
     "matplotlib>=3.5.1",
     "torch>=2.0.1",
