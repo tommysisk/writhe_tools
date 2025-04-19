@@ -9,7 +9,7 @@ from .utils.indexing import get_segments, incidence_writhe_edges
 @torch.jit.script
 def divnorm(x: torch.Tensor):
     """Convenience function for (batched) normalization of vectors stored in arrays with last dimension 3"""
-    return x / torch.linalg.norm(x, dim=-1, keepdim=True)
+    return x / (torch.linalg.norm(x, dim=-1, keepdim=True))
 
 
 @torch.jit.script
@@ -48,13 +48,12 @@ def writhe_segments(xyz: torch.Tensor,
     signs = (torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
                          xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
                          dim=-1) * dx[:, :, 0]).sum(-1).sign()
-
     if use_cross:
         dx = divnorm(torch.cross(dx[:, :, [0, 1, 3, 2]],
                                  dx[:, :, [1, 3, 2, 0]],
                                  dim=-1))
 
-        dx = (dx[:, :, [0, 1, 2, 3]] * dx[:, :, [1, 2, 3, 0]]).sum(-1).clip(-1, 1).arcsin().sum(2)
+        dx = (dx[:, :, [0, 1, 2, 3]] * dx[:, :, [1, 2, 3, 0]]).sum(-1).clamp(-1, 1).arcsin().sum(2)
     else:
         # compute all dot products, then work with scalars
         dx = (dx[:, :, [0, 0, 0, 1, 1, 2]] * dx[:, :, [1, 2, 3, 2, 3, 3]]).sum(-1)
@@ -68,9 +67,9 @@ def writhe_segments(xyz: torch.Tensor,
 
               / ((1 - dx[:, :, u] ** 2) * (1 - dx[:, :, v] ** 2)).clamp(min=1e-16).sqrt()
 
-              ).clip(-1, 1).arcsin().sum(-1)
+              ).clamp(-1, 1).arcsin().sum(-1)
 
-    return torch.squeeze(dx * signs) / (2 * torch.pi)
+    return dx * signs / (2 * torch.pi)
 
 
 class TorchWrithe(nn.Module):
@@ -109,6 +108,9 @@ class TorchWrithe(nn.Module):
                                                                 dim=-1).float(),
                                                       torch.Tensor([n_atoms, 1]).float()
                                                       ).argsort().squeeze())
+            # self.register_buffer("repeat_interleave",
+            #                      torch.arange(int(((n_atoms - 1) * (n_atoms - 2) / 2 ) - (n_atoms - 2))).repeat_interleave(4)
+            #                      )
 
     @property
     def n_atoms(self):
@@ -152,9 +154,9 @@ class TorchWrithe(nn.Module):
                                  dx[:, :, [1, 3, 2, 0]],
                                  dim=-1))
 
-        dx = (dx[:, :, [0, 1, 2, 3]] * dx[:, :, [1, 2, 3, 0]]).sum(-1).clip(-1, 1).arcsin().sum(2)
+        dx = (dx[:, :, [0, 1, 2, 3]] * dx[:, :, [1, 2, 3, 0]]).sum(-1).clamp(-1, 1).arcsin().sum(2)
 
-        return torch.squeeze(dx * signs) / (2 * torch.pi), axial_vector
+        return dx * signs / (2 * torch.pi), axial_vector
 
     def forward(self, xyz, vector: bool = False):
 

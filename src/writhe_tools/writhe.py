@@ -107,6 +107,8 @@ def calc_writhe_parallel_cuda(xyz: torch.Tensor,
 
 
 def to_writhe_matrix(writhe_features, n_points, length):
+    # assert not all(i is None for i in (n_points, length)), "Must provide either n_points (atoms) or segment length"
+    # if n_points is not None:
     writhe_features = (np.expand_dims(writhe_features, 0) if writhe_features.ndim < 2
                        else writhe_features)
     n = len(writhe_features)
