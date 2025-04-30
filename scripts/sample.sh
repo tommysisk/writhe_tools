@@ -1,8 +1,8 @@
-source ~/.bashrc
 module load cuda/12
 NCCL_P2P_DISABLE=1
-source /dartfs-hpc/rc/lab/R/RobustelliP/Tommy/miniconda3/etc/profile.d/conda.sh
-conda activate package
+#source /dartfs-hpc/rc/home/4/f005dy4/miniconda3/etc/profile.d
+#conda activate base
+#source ~/.bashrc
 
 function full_search()
 {
@@ -19,14 +19,13 @@ function fxn_lsnew()
 
 
 data_path="/dartfs-hpc/rc/lab/R/RobustelliP/Tommy/asyn_gen/graphs.pt"
-path="/dartfs-hpc/rc/lab/R/RobustelliP/Tommy/asyn_gen/ddpm/my_ito/asyn_writhe_distance_2_250_bins"
+log_path="/dartfs-hpc/rc/lab/R/RobustelliP/Tommy/asyn_gen/ddpm/my_ito/writhe_vector_scalar_standard_test"
 template_pdb="/dartfs-hpc/rc/lab/R/RobustelliP/Tommy/asyn_gen/ddpm/my_ito/asyn_ca.pdb"
 scale="0.5081033"
-file_kw="batch" # search for the directory containing keypoint by keyword (next line)
+#file_kw="batch" # search for the directory containing keypoint by keyword (next line)
 
 
-log_path=$(full_search "$path" "$file_kw")
-ckpt_file=$(fxn_lsnew "$log_path" | grep epoch= | head -n 1) # grab the newest checkpoint
+ckpt_file=$(fxn_lsnew "$(full_search "$log_path" batch)" | grep epoch= | head -n 1)
 
 
 ./sample.py \
