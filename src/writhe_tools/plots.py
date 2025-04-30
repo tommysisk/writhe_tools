@@ -8,7 +8,11 @@ from typing import Union, Optional, List
 
 
 
-def get_flat_bin_indices_2d(x, y, bins=(10, 10), range=None, out_of_bounds_val=-1):
+def get_flat_bin_indices_2d(x,
+                            y,
+                            bins=(10, 10),
+                            range=None,
+                            out_of_bounds_val=-1):
     """
     Return the flattened bin index for each (x, y) pair, using binning identical to np.histogram2d.
 
@@ -63,9 +67,12 @@ def box_plot(values: np.ndarray,
              color_list: list = None,
              title: str = None,
              ax=None,
+             figsize: tuple=(10, 6),
              font_scale: float = 5,
              label_stride: int = 1,
              capsize: float = 10,
+             error_capsize: float = 10,
+             error_linewidth: float = 3,
              width: float = .95,
              linewidth: float = 1,
              edgecolor: str = "black",
@@ -86,10 +93,11 @@ def box_plot(values: np.ndarray,
         cmap_fn = plt.get_cmap(cmap)
         color_list = [cmap_fn(norm(val)) for val in values]
     else:
-        color_list = get_color_list(nstates, cmap, trunc, pre_trunc) if color_list is None else color_list
+        color_list = get_color_list(nstates, cmap, trunc, pre_trunc) if color_list is None\
+                     else color_list
 
     if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
 
     ax.bar(labels.astype(str),
            values,
@@ -102,7 +110,7 @@ def box_plot(values: np.ndarray,
            edgecolor=edgecolor,
            align="center",
            alpha=alpha,
-           error_kw=dict(capthick=capsize, lw=3),
+           error_kw=dict(capthick=error_capsize, lw=error_linewidth),
            )
 
     ax.set_xticks(ticks=np.arange(0, nstates, label_stride), labels=labels[::label_stride])

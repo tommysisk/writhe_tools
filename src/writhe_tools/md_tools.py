@@ -12,6 +12,8 @@ from .utils.indexing import (triu_flat_indices,
 from .utils.sorting import filter_strs, lsdir
 from .plots import plot_distance_matrix, build_grid_plot
 from numba import njit, prange
+import os
+
 
 
 
@@ -81,7 +83,20 @@ class ResidueDistances:
 
         pass
 
-    def save(self, file: str):
+    def save(self,
+             path: str = None,
+             dscr: str = None,
+             ) -> None:
+
+        if path is not None:
+            if not os.path.isdir(path):
+                os.makedirs(path)
+        else:
+            path = os.getcwd()
+
+        file = (f"{path}/distance_dict" if dscr is None
+                else f"{path}/{dscr}_distance_dict") + ".pkl"
+
         args = {attr: getattr(self, attr) for attr in filter(lambda x: hasattr(self, x),
                                                              ["distances", "index_0", "index_1",
                                                               "chain_id_0", "chain_id_1", "residues_0",

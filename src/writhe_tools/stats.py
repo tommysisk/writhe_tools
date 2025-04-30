@@ -307,7 +307,7 @@ def pca(x: np.ndarray,
     """compute the business half of econ svd"""
     x = standardize(x, shift=shift, scale=scale, weights=weights)
 
-    norm = np.sqrt(x.shape) if scale is None and weights is None else 1
+    norm = np.sqrt(x.shape[0]) if scale is False and weights is None else 1
 
     s, vt = svd(x / norm, full_matrices=False)[1:] if not dask else\
             dask_svd(x / norm, k=n_comp, compressed=True)[1:]
@@ -963,7 +963,8 @@ class DensityComparator():
         return
 
     def compare(self, attr: str, weight: bool = False, metric: callable = None,
-                pairs: np.ndarray = None, weight0: bool = None, weight1: bool = None):
+                pairs: np.ndarray = None, weight0: bool = None, weight1: bool = None,
+                iterate: bool = False):
 
         pairs = self.data_pairs if pairs is None else pairs
 
@@ -995,6 +996,10 @@ class DensityComparator():
                 densities.append(getattr(self, attr_))
 
             d0, d1 = [np.stack([d[i] for i in p]) for p, d in zip(pairs.T, densities)]
+
+        if iterate:
+            assert metric is not None, 'Metric cannot be left to None if iterate is True'
+            return np.array([metric(i, j) for i, j in zip(d0, d1)])
 
         metric = partial(self.cos_similarity if metric is None else metric, axis=(1, 2) if d0.ndim > 2 else -1)
 
