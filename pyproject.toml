@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "writhe_tools"
-version = "0.0.15"
+version = "0.0.16"
 description = "A high-performance Python package for computing the geometric descriptor writhe from 3D coordinate data."
 authors = [
     { name = "Thomas Sisk", email = "Thomas.r.Sisk.gr@dartmouth.edu" }

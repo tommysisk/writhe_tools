@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 from argparse import ArgumentParser
-from ito import GeometricDDPM
+from sbm import GeometricDDPM
 from torch_geometric.loader import DataLoader
 from writhe_tools.utils.graph_utils import GraphDataSet
 import mdtraj as md
@@ -60,14 +60,14 @@ def main(args):
 
     top = md.load(args.template_pdb).top
 
-    model = GeometricDDPM.load_from_checkpoint(checkpoint_path=args.ckpt_file)
+    model = GeometricDDPM.load_from_checkpoint(checkpoint_path=args.ckpt_file, strict=False)
 
     dataset = GraphDataSet(file=args.data_path)
     loader = DataLoader(dataset, batch_size=256, shuffle=True)
     samples = []
     for i, batch in enumerate(loader):
         samples.append(model.sample_like(batch, ode_steps=args.ode_steps).x.cpu().numpy().reshape(-1, top.n_atoms, 3))
-        if i > 182 * 5: break
+        if i > 182 * 5 * 5: break
 
     save_mdtraj(xyz=np.concatenate(samples) * args.scale,
                 file=f"{log_path}/samples",
