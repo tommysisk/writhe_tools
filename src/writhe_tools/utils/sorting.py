@@ -6,14 +6,18 @@ import warnings
 import os
 
 
-def num_str(s, return_str=False, return_num=True):
-    s = ''.join(filter(str.isdigit, s))
-    if return_str and return_num:
-        return s, int(s)
-    if return_str:
-        return s
-    if return_num:
-        return int(s)
+def num_str(s, return_str=False, return_num=True, reverse: bool = False):
+    if reverse:
+        return ''.join(i for i in s if not str.isdigit(i))
+
+    else:
+        s = ''.join(filter(str.isdigit, s))
+        if return_str and return_num:
+            return s, int(s)
+        if return_str:
+            return s
+        if return_num:
+            return int(s)
 
 
 def rm_path(string: str):

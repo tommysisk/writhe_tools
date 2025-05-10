@@ -171,6 +171,16 @@ def combinations(x):
 def shifted_pairs(x: np.ndarray, shift: int, ax: int = 1):
     return np.stack([x[:-shift], x[shift:]], ax)
 
+def one_hot(labels, nlabels:int = None):
+    labels = labels.flatten()
+    np.put_along_axis((one_hot_ :=
+                       np.zeros((labels.size, labels.max() + 1\
+                                       if nlabels is None else nlabels), dtype=int)),
+                      labels[:, None],
+                      1,
+                      axis=1,
+                      )
+    return one_hot_
 
 def get_segments(n: int = None,
                  length: int = 1,
