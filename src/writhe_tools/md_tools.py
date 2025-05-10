@@ -41,6 +41,54 @@ def parallel_distances(xyz, pairs, length=None):
         distances[i] = distance_pair(xyz, pairs[i], length)
     return distances
 
+def to_distance_matrix(distances: np.ndarray,
+                       n: int,
+                       m: int = None,
+                       d0: int = 1):
+    distances = distances.squeeze()
+    assert distances.ndim < 3, "distances must be either 1 or two dimensional"
+    distances = distances.reshape(1, -1) if distances.ndim < 2 else distances
+
+    # info about flattened distance matrix
+    N, d = distances.shape
+
+    # intra molecular distances
+    if m is None:
+        matrix = np.zeros([N] + [n] * 2)
+        i, j = np.triu_indices(n, d0)
+        matrix[:, i, j] = distances
+        return (matrix + matrix.transpose(0, 2, 1)).squeeze()
+
+    else:
+        assert d == n * m, \
+            "Given dimensions (n,m) do not correspond to the dimension of the flattened distances"
+
+        return distances.reshape(-1, n, m).squeeze()
+
+
+def residue_distances(traj,
+                      index_0: np.ndarray,
+                      index_1: np.ndarray = None,
+                      periodic: bool = True,
+                      parallel: bool = False):
+    # intra distance case
+    if index_1 is None:
+        indices = combinations(index_0)
+        return md.compute_contacts(traj, indices, periodic=periodic)[0], indices if not parallel \
+            else parallel_distances(traj.xyz, indices, length=traj.unitcell_lengths if periodic else None)
+
+    # inter distance case
+    else:
+        indices = product(index_0, index_1)
+        return md.compute_contacts(traj, indices, periodic=periodic)[0], indices if not parallel \
+            else parallel_distances(traj.xyz, indices, length=traj.unitcell_lengths if periodic else None)
+
+
+def to_contacts(distances: np.ndarray, cut_off: float = 0.5):
+    return np.where(distances < cut_off, 1, 0)
+
+
+
 
 class ResidueDistances:
     def __init__(self,
@@ -49,7 +97,8 @@ class ResidueDistances:
                  index_1: np.ndarray = None,
                  chain_id_0: str = None,
                  chain_id_1: str = None,
-                 contact_cutoff=0.5,
+                 contact_cutoff:float=0.5,
+                 parallel: bool = False,
                  args: "dict or path (str) to saved dict" = None):
 
         # restore the class from dictionary that it saves
@@ -72,14 +121,16 @@ class ResidueDistances:
                 self.n = len(index_0)
                 self.m = None
                 self.prefix = "Intra"
-                self.distances = residue_distances(traj, index_0)[0]
+                self.distances = residue_distances(traj, index_0,
+                                                   parallel=parallel)[0]
 
             else:
                 self.chain_id_0, self.chain_id_1 = chain_id_0, chain_id_1
                 self.residues_0, self.residues_1 = get_residues(traj, [index_0, index_1])
                 self.n, self.m = map(len, (index_0, index_1))
                 self.prefix = "Inter"
-                self.distances = residue_distances(traj, index_0, index_1)[0]
+                self.distances = residue_distances(traj, index_0, index_1,
+                                                   parallel=parallel)[0]
 
         pass
 
@@ -114,57 +165,58 @@ class ResidueDistances:
         assert self.prefix == "Intra", "Must be intra molecular distances to subsample distances"
         return self.distances[:, triu_flat_indices(self.n, 1, d)]
 
-    def matrix(self, contacts: bool = False,
+    def matrix(self,
+               distances: np.ndarray=None,
+               contacts: bool = False,
                cut_off: float = None,
-               distances: np.ndarray=None):
+               ):
 
         distances = self.distances if distances is None else distances
+        return to_distance_matrix(to_contacts(distances, cut_off or self.contact_cutoff)\
+                                  if contacts else distances,
+                                  self.n,
+                                  self.m)
 
-        cut_off = self.contact_cutoff if cut_off is None else cut_off
+    def contacts(self, cut_off: float=None):
+        cut_off = cut_off if cut_off is not None else self.contact_cutoff
+        return to_contacts(self.distances, cut_off=cut_off)
 
-        if contacts:
-            assert cut_off is not None, "Must provide contact cutoff in init statement or as an argument"
-            return to_contact_matrix(to_distance_matrix(distances, self.n, self.m),
-                                     cut_off=cut_off)
-        else:
-            return to_distance_matrix(distances, self.n, self.m)
-
-    def plot(self, index: "list, int, str" = None,
+    def plot(self,
+             index: "list, int, str" = None,
              contacts: bool = False,
-             contact_cut_off: float = None,
+             contact_cutoff: float = None,
              dscr: str = "",
              label_stride: int = 3,
              font_scale: int = 1,
              cmap: str = "jet",
              line_plot_args: dict = None,
+             xticks_rotation: float = 0,
              ax=None):
 
+
+
         if contacts:
+            matrix = self.contacts(contact_cutoff)
             __dtype = "Contacts"
             unit = ""
         else:
+            matrix = self.distances
             __dtype = "Distances"
             unit = " (nm)"
 
         if index is None:
-            matrix = self.matrix(contacts,
-                                 contact_cut_off,
-                                 distances=self.distances.mean(0))
+            matrix = self.matrix(matrix.mean(0))
             __stype = "Average "
 
         elif isinstance(index, (int, float)):
             index = int(index)
-            matrix = self.matrix(contacts,
-                                 contact_cut_off,
-                                 self.distances[index])
+            matrix = self.matrix(matrix[index])
             __stype = ""
             dscr = f"Frame {index}"
 
         else:
             index = to_numpy(index).astype(int)
-            matrix = self.matrix(contacts,
-                                 contact_cut_off,
-                                 self.distances[index].mean(0))
+            matrix = self.matrix(matrix[index].mean(0))
             __stype = "Average "
 
             if dscr == "":
@@ -183,6 +235,7 @@ class ResidueDistances:
                             "ylabel": self.chain_id_0,
                             "yticks": self.residues_0,
                             "xlabel": self.chain_id_1,
+                            "xticks_rotation": xticks_rotation,
                             "xticks": self.residues_1,
                             "title": title,
                             "cbar_label": cbar_label,
@@ -397,52 +450,5 @@ def get_residues(traj,
     else:
         return [np.concatenate(list(map(func, i))) if (len(i) != 1 and cat and atoms) else
                 list(map(func, i)) if len(i) != 1 else func(i) for i in indices]
-
-
-def to_distance_matrix(distances: np.ndarray,
-                       n: int,
-                       m: int = None,
-                       d0: int = 1):
-    distances = distances.squeeze()
-    assert distances.ndim < 3, "distances must be either 1 or two dimensional"
-    distances = distances.reshape(1, -1) if distances.ndim < 2 else distances
-
-    # info about flattened distance matrix
-    N, d = distances.shape
-
-    # intra molecular distances
-    if m is None:
-        matrix = np.zeros([N] + [n] * 2)
-        i, j = np.triu_indices(n, d0)
-        matrix[:, i, j] = distances
-        return (matrix + matrix.transpose(0, 2, 1)).squeeze()
-
-    else:
-        assert d == n * m, \
-            "Given dimensions (n,m) do not correspond to the dimension of the flattened distances"
-
-        return distances.reshape(-1, n, m).squeeze()
-
-
-def residue_distances(traj,
-                      index_0: np.ndarray,
-                      index_1: np.ndarray = None,
-                      periodic: bool = True,
-                      parallel: bool = False):
-    # intra distance case
-    if index_1 is None:
-        indices = combinations(index_0)
-        return md.compute_contacts(traj, indices, periodic=periodic)[0], indices if not parallel\
-                else parallel_distances(traj.xyz, indices, length=traj.unitcell_lengths if periodic else None)
-
-    # inter distance case
-    else:
-        indices = product(index_0, index_1)
-        return md.compute_contacts(traj, indices, periodic=periodic)[0], indices if not parallel \
-                else parallel_distances(traj.xyz, indices, length=traj.unitcell_lengths if periodic else None)
-
-
-def to_contact_matrix(distances: np.ndarray, cut_off: float = 0.5):
-    return np.where(distances < cut_off, 1, 0)
 
 

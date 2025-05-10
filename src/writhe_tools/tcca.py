@@ -89,7 +89,6 @@ class CCA:
 
         if dim is not None:
             assert dim <= self.dim, "Cannot transform onto dimension larger than fit estimate"
-            self.dim = dim
         else:
             dim = self.dim
 
@@ -100,7 +99,7 @@ class CCA:
             if scale:
                 vecs = [v * self.svals[:dim] for v in vecs]
 
-            return [getattr(self, xi) - getattr(self, f"{xi}_mean") @ self.pseudo_half_inv[xi] @ v
+            return [(getattr(self, xi) - getattr(self, f"{xi}_mean")) @ self.pseudo_half_inv[xi] @ v
                     for xi, v in zip(["x0", "x1"], vecs)]
 
         elif isinstance(x, str):

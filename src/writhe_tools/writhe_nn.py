@@ -60,8 +60,8 @@ def writhe_segments(xyz: torch.Tensor,
         # get indices; dots is ordered according to indices of 3,3 upper right triangle
         # we compute dots first because we use each twice
         u, v, h = [0, 4, 5, 1], \
-            [4, 5, 1, 0], \
-            [2, 3, 2, 3]
+                  [4, 5, 1, 0], \
+                  [2, 3, 2, 3]
         # surface area from scalars
         dx = ((dx[:, :, u] * dx[:, :, v] - dx[:, :, h])
 

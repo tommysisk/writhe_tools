@@ -387,12 +387,14 @@ class Writhe:
                            ylabel: Optional[str] = None,
                            xticks: Optional[np.ndarray] = None,
                            yticks: Optional[np.ndarray] = None,
+                           xticks_rotation: Optional[Union[float, None]] = 0,
+                           yticks_rotation: Optional[Union[float, None]] = 0,
                            label_stride: int = 5,
                            dscr: Optional[str] = None,
                            font_scale: float = 1,
                            cmap: Optional[str] = None,
                            ax: Optional[plt.Axes] = None,
-                           rotation: Optional[float] = 90,
+                           #rotation: Optional[float] = 90,
                            weights: Optional[np.ndarray] = None) -> None:
         """
         Plots the writhe matrix for visualizing writhe values in topological frames.
@@ -407,6 +409,8 @@ class Writhe:
             ylabel (Optional[str], optional): Label for the y-axis. Defaults to None.
             xticks (Optional[np.ndarray], optional): Array or list of tick labels for the x-axis. Defaults to None.
             yticks (Optional[np.ndarray], optional): Array or list of tick labels for the y-axis. Defaults to None.
+            xticks_rotation (Optional[float], optional): Rotation (degrees) of xtick labels. Defaults to 0.
+            yticks_rotation (Optional[float], optional): Rotation (degrees) of ytick labels. Defaults to 0.
             label_stride (int, optional): Interval to reduce tick labels for visualization. Defaults to 5.
             dscr (Optional[str], optional): Description for the subset of frames averaged, if applicable. Defaults to None.
             font_scale (float, optional): Scale factor for font sizes. Defaults to 1.
@@ -494,20 +498,21 @@ class Writhe:
             else:
                 labels = np.arange(0, self.n_points)
 
-            rotation_ = rotation if key == "xticks" else None
 
             labels = labels[:-self.length][np.linspace(0,
                                                        self.n_points - self.length - 1,
-                                                       (self.n_points - self.length - 1) // label_stride).astype(int)
-            ]
+                                                       (self.n_points - self.length - 1) // label_stride).astype(int)]
 
             ticks = np.linspace(0,
                                 self.n_points - self.length - 1,
                                 len(labels))
 
+
             _ = getattr(ax, f"set_{key}")(ticks=ticks,
                                           labels=labels,
-                                          rotation=rotation_)
+                                          rotation=args[f"{key}_rotation"])
+
+
 
         ax.invert_yaxis()
 

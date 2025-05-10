@@ -3,8 +3,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
 from itertools import chain
-#from .stats import pmf
 from typing import Union, Optional, List
+#from .stats import pmf
+from .utils.indexing import to_numpy
 
 
 
@@ -58,6 +59,7 @@ def get_flat_bin_indices_2d(x,
 def box_plot(values: np.ndarray,
              errors: np.ndarray = None,
              labels: np.ndarray = None,
+             label: str = None,
              ylabel: str = None,
              xlabel: str = None,
              ymin: float = None,
@@ -90,7 +92,7 @@ def box_plot(values: np.ndarray,
     # Choose colors based on height if color_height is True
     if color_height:
         norm = plt.Normalize(vmin=values.min(), vmax=values.max())
-        cmap_fn = plt.get_cmap(cmap)
+        cmap_fn = plt.get_cmap(cmap) if isinstance(cmap, str) else cmap
         color_list = [cmap_fn(norm(val)) for val in values]
     else:
         color_list = get_color_list(nstates, cmap, trunc, pre_trunc) if color_list is None\
@@ -111,6 +113,7 @@ def box_plot(values: np.ndarray,
            align="center",
            alpha=alpha,
            error_kw=dict(capthick=error_capsize, lw=error_linewidth),
+           label=label,
            )
 
     ax.set_xticks(ticks=np.arange(0, nstates, label_stride), labels=labels[::label_stride])
@@ -214,7 +217,7 @@ def plot_distance_matrix(matrix: np.ndarray,
                          ylabel: str = None,
                          xticks: "list or np.ndarray" = None,
                          yticks: "list or np.ndarray" = None,
-                         xticks_rotation: float = 90,
+                         xticks_rotation: float = 0,
                          yticks_rotation: float = None,
                          label_stride: int = None,
                          title: str = None,
@@ -263,18 +266,60 @@ def plot_distance_matrix(matrix: np.ndarray,
 
         cbar.ax.tick_params(labelsize=8 * font_scale)
 
-    for dim, key in zip([m, n], ["xticks", "yticks"]):
 
-        val = args[key]
-        if val is not None:
-            assert len(val) == dim, f"{key} don't match matrix dimension"
+    ###############
 
-            loc = np.arange(0, len(val))[::label_stride]
-            val = val[::label_stride]
+    for i, (key, n_points) in enumerate(zip(["yticks", "xticks"], (n, m))):
+        if args[key] is not None:
+            assert isinstance(args[key], (np.ndarray, list)), \
+                "ticks arguments must be list or np.ndarray"
 
-            _ = getattr(ax, f"set_{key}")(loc,
-                                          val,
-                                          rotation=args[f"{key}_rotation"])
+            labels = to_numpy(args[key]).squeeze()
+
+            assert n_points == len(labels), \
+                (f"{key} don't match the number of points used to compute writhe"
+                 "The number of points (n_points) used to compute writhe should be equal to the number of tick labels."
+                 "This method will correctly handle tick labels to account for the length used to compute writhe")
+
+        else:
+            labels = np.arange(0, n_points)
+
+        labels = labels[np.linspace(0,
+                                    n_points - 1,
+                                    (n_points - 1) // label_stride).astype(int)]
+
+        ticks = np.linspace(0,
+                            n_points -  1,
+                            len(labels))
+
+        _ = getattr(ax, f"set_{key}")(ticks=ticks,
+                                      labels=labels,
+                                      rotation=args[f"{key}_rotation"])
+
+
+
+
+
+
+
+
+
+
+
+
+    # for dim, key in zip([m, n], ["xticks", "yticks"]):
+    #
+    #
+    #     val = args[key]
+    #     if val is not None:
+    #         assert len(val) == dim, f"{key} don't match matrix dimension"
+    #
+    #         loc = np.arange(0, len(val))[::label_stride]
+    #         val = val[::label_stride]
+    #
+    #         _ = getattr(ax, f"set_{key}")(loc,
+    #                                       val,
+    #                                       rotation=args[f"{key}_rotation"])
     if hide_x:
         ax.tick_params(axis='x',  # changes apply to the x-axis
                        which='both',  # both major and minor ticks are affected
