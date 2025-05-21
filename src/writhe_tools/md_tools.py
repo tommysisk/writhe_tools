@@ -212,7 +212,7 @@ class ResidueDistances:
             index = int(index)
             matrix = self.matrix(matrix[index])
             __stype = ""
-            dscr = f"Frame {index}"
+            dscr = f'Frame {index}' if dscr is None else dscr
 
         else:
             index = to_numpy(index).astype(int)

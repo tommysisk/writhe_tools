@@ -40,7 +40,13 @@ matplotlib.text._log.addFilter(MplFilter())
 # The more straight forward way of computing the writhe is implemented in writhe_nn,
 # this computation is written specifically for ray and should not be used otherwise
 def mean(x: np.ndarray, weights: np.ndarray = None, ax: int = 0):
-    return x.mean(ax) if weights is None else (weights[:, None] * x).sum(ax) / weights.sum()
+
+    if weights is None:
+        return x.mean(ax)
+    else:
+        shape = (1 if i != ax else x.shape[i] for i in range(len(x.shape)))
+        return (weights.reshape(*shape) * x).sum(ax) / weights.sum()
+
 
 def window_average(x, N):
     cumsum = np.cumsum(np.insert(x, 0, 0))
@@ -430,6 +436,8 @@ class Writhe:
 
         mat = self.writhe_features
 
+        #label_stride -= 1
+
         if absolute:
             mat = np.abs(mat)
             cmap = "Reds" if cmap is None else cmap
@@ -445,7 +453,7 @@ class Writhe:
             index = to_numpy(index).astype(int)
             if len(index) == 1:
                 mat = mat[index.item()]
-                title = f"Writhe Matrix: Frame {index.item()}"
+                title = f"Writhe Matrix: {f'Frame {index.item()}' if dscr is None else dscr}"
             else:
                 mat = mean(mat[index], weights)
                 if dscr is None:

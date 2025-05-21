@@ -4,7 +4,8 @@ from .utils.indexing import (group_by,
                              reindex_list,
                              product,
                              combinations)
-from .utils.misc import optional_import
+from .utils.misc import optional_import, to_numpy
+
 scipy = optional_import('scipy', 'stats' )
 
 from typing import List, Union, Any
@@ -21,7 +22,7 @@ from scipy.linalg import svd, sqrtm
 import ray
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score, pairwise_distances
-from pyblock.blocking import reblock, find_optimal_block
+#from pyblock.blocking import reblock, find_optimal_block
 import dask.array as da
 
 
@@ -110,12 +111,19 @@ def pmf(x: "list of arrays or array",
                     else pmfdd(x, bins, weights, norm, range)
 
 
-def mean(x: np.ndarray, weights: np.ndarray = None, ax: int = 0):
-    return x.mean(ax) if weights is None else (weights[:, None] * x).sum(ax) / weights.sum()
+def mean(x: np.ndarray,
+         weights: np.ndarray = None,
+         ax: int = 0,
+         keepdims: bool = False):
 
+    if weights is None:
+        return x.mean(ax)
+    else:
+        shape = (1 if i != ax else x.shape[i] for i in range(len(x.shape)))
+        return (weights.reshape(*shape) * x).sum(ax, keepdims=keepdims) / weights.sum()
 
 def center(x: np.ndarray, weights: np.ndarray = None):
-    return x - mean(x, weights)
+    return x - mean(x, weights, keepdims=True)
 
 
 def std(x: np.ndarray,
@@ -133,16 +141,33 @@ def std(x: np.ndarray,
         else:
             N = weights.sum()
 
-        mu = mean(x, weights, ax=ax)
-        return np.sqrt(np.sum(weights[:, None] * (x - mu) ** 2, axis=ax) / N)
+        shape = (1 if i != ax else x.shape[i] for i in range(len(x.shape)))
+
+    return np.sqrt(np.sum(weights.reshape(*shape)
+                          * center(x, weights) ** 2,
+                          axis=ax) / N)
 
 
 def standardize(x: np.ndarray,
                 weights: np.ndarray = None,
-                shift: bool = True, scale: bool = True, ax: int = 0):
-    mu = mean(x, weights, ax=ax) if shift else 0
-    s = std(x, weights, ax=ax) if scale else 1
-    return np.divide((x - mu), s, out=np.zeros_like(x), where=s != 0.)
+                shift: bool = True,
+                scale: bool = True,
+                ax: int = 0):
+
+    if scale:
+
+        shape = (1 if i == ax else x.shape[i] for i in range(len(x.shape)))
+
+        s = std(x, weights, ax=ax).reshape(*shape)
+
+        return np.divide(center(x, weights) if shift else x,
+                     s, out=np.zeros_like(x), where=s != 0.)
+
+    else:
+        return center(x, weights) if shift else x
+
+
+
 
 
 def cov(x: np.ndarray,
@@ -507,18 +532,18 @@ def rmse(x, y):
     return np.sqrt(np.power(x.flatten() - y.flatten(), 2).mean())
 
 
-def block_error(x: np.ndarray):
-    """
-    x : (d, N) numpy array with d features and N measurements
-    """
-    n = x.shape[-1]
-    blocks = reblock(x)
-    optimal_indices = np.asarray(find_optimal_block(n, blocks))
-    isnan = np.isnan(optimal_indices)
-    #mode = Counter(optimal_indices[~isnan].astype(int)).most_common()[0][0]
-    optimal_indices[isnan] = -1 #mode
-    print(optimal_indices)
-    return np.asarray([blocks[i].std_err[j] for j, i in enumerate(optimal_indices.astype(int))])
+# def block_error(x: np.ndarray):
+#     """
+#     x : (d, N) numpy array with d features and N measurements
+#     """
+#     n = x.shape[-1]
+#     blocks = reblock(x)
+#     optimal_indices = np.asarray(find_optimal_block(n, blocks))
+#     isnan = np.isnan(optimal_indices)
+#     #mode = Counter(optimal_indices[~isnan].astype(int)).most_common()[0][0]
+#     optimal_indices[isnan] = -1 #mode
+#     print(optimal_indices)
+#     return np.asarray([blocks[i].std_err[j] for j, i in enumerate(optimal_indices.astype(int))])
 
 
 def process_ids(ids):
@@ -580,7 +605,7 @@ class MaxEntropyReweight():
         self.lambdas = None
 
         # error in comp data
-        self.sigma_md = block_error(np.asarray(constraints)) if sigma_md is None else np.copy(sigma_md)
+        self.sigma_md = np.asarray(constraints).std() if sigma_md is None else np.copy(sigma_md)
 
         # regularization hyperparameter (one per data type)
         self.sigma_reg = np.zeros(self.n_constraints) if sigma_reg is None else np.copy(sigma_reg)
