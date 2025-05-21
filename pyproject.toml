@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "writhe_tools"
-version = "0.0.16"
+version = "0.0.19"
 description = "A high-performance Python package for computing the geometric descriptor writhe from 3D coordinate data."
 authors = [
     { name = "Thomas Sisk", email = "Thomas.r.Sisk.gr@dartmouth.edu" }
@@ -61,11 +61,12 @@ mdtraj = [
 ]
 
 stats = [
-    "pyblock>=0.6",
+    #"pyblock>=0.6",
     "dask>=2022.2.1",
     "deeptime>=0.4.1",
     "scipy>=1.9.0",
-    "scikit-learn>=1.5.0"
+    "scikit-learn>=1.5.0",
+   # 'pandas'
 ]
 
 dev = [
@@ -81,4 +82,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [project.urls]
-Homepage = "https://github.com/tommysisk/Writhe_Paper"
+Homepage = "https://github.com/tommysisk/writhe_tools"
