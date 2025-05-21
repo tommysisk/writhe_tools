@@ -149,12 +149,9 @@ def group_by(keys: np.ndarray,
     keys = np.unique(keys, axis=key_axis, return_inverse=True)[-1] if keys.ndim > 1 else keys
     if reduction is not None:
         values = np.ones_like(keys) if values is None else values.squeeze()
-        if values.ndim > 1:
-            groups = [i[-1] for i in group_by_(keys=keys, values=values, reduction=reduction)]
-            return np.stack(groups).squeeze() if len({i.shape for i in groups}) == 1\
-                    else groups
-        else:
-            return np.asarray(group_by_(keys=keys, values=values, reduction=reduction))[:, -1]
+        groups = [i[-1] for i in group_by_(keys=keys, values=values, reduction=reduction)]
+        return (np.stack(groups).squeeze() if len({i.shape for i in groups}) == 1 else groups) \
+            if isinstance(groups[0], np.ndarray) else np.asarray(groups)
     else:
         values = np.arange(len(keys)) if values is None else values
         return group_by_(keys).split_array_as_list(values)
