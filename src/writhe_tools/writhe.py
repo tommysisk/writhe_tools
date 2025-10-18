@@ -18,7 +18,7 @@ from .utils.indexing import split_list, get_segments
 from .utils.torch_utils import estimate_segment_batch_size, catch_cuda_oom
 from .writhe_nn import writhe_segments
 from .writhe_ray import writhe_segments_ray
-from .writhe_numba import writhe_segments_numba
+from .writhe_numba import writhe_segments_numba, writhe_segments_numba_pbc
 from .utils.filing import save_dict, load_dict
 from .utils.misc import to_numpy, Timer
 # from .stats import window_average, mean
@@ -36,9 +36,6 @@ class MplFilter(logging.Filter):
 matplotlib.text._log.addFilter(MplFilter())
 
 
-# Here, we consider the approach at is fastest with ray multiprocessing on CPUs!
-# The more straight forward way of computing the writhe is implemented in writhe_nn,
-# this computation is written specifically for ray and should not be used otherwise
 def mean(x: np.ndarray, weights: np.ndarray = None, ax: int = 0):
 
     if weights is None:
@@ -57,29 +54,58 @@ def calc_writhe_parallel(xyz: np.ndarray,
                          segments: np.ndarray,
                          use_cross: bool = True,
                          cpus_per_job=1,
-                         cpu_method: str = "ray"):
+                         cpu_method: str = "ray",
+                         lengths: np.ndarray = None):
+
     assert cpu_method in ["ray", "numba"], "method should be 'ray' or 'numba'."
 
     if cpu_method == "ray":
         return writhe_segments_ray(xyz=xyz,
                                    segments=segments,
                                    use_cross=use_cross,
-                                   cpus_per_job=cpus_per_job)
+                                   cpus_per_job=cpus_per_job,
+                                   lengths=lengths)
     if cpu_method == "numba":
-        return writhe_segments_numba(xyz=xyz,
-                                     segments=segments)
+        if lengths is not None:
+            return writhe_segments_numba_pbc(xyz=xyz,
+                                         segments=segments,
+                                         lengths=lengths)
+        else:
+            return writhe_segments_numba(xyz=xyz, segments=segments)
+
+
 
 
 def writhe_batches_cuda(xyz: torch.Tensor,
                         segments: torch.LongTensor,
                         use_cross: bool = True,
-                        device: int = 0):
+                        device: int = 0,
+                        lengths: torch.Tensor = None):
     xyz = xyz.to(device)
-    result = torch.cat([writhe_segments(xyz, i, use_cross=use_cross).cpu() for i in segments], axis=-1).numpy() \
+
+    if lengths is not None:
+        lengths = lengths.to(device)
+        periodic = True
+    else:
+        lengths = torch.empty(0)
+        periodic=False
+
+    #periodic = True if lengths is not None else False
+
+    # noinspection PyArgumentList
+    result = torch.cat([writhe_segments(xyz,
+                                        i,
+                                        use_cross=use_cross,
+                                        lengths=lengths,
+                                        periodic=periodic).cpu() for i in segments], axis=-1).numpy() \
         if isinstance(segments, (list, tuple)) else writhe_segments(xyz=xyz,
                                                                     segments=segments,
-                                                                    use_cross=use_cross).cpu().numpy()
+                                                                    use_cross=use_cross,
+                                                                    lengths=lengths,
+                                                                    periodic=periodic).cpu().numpy()
     del xyz
+    #if lengths is not None:
+    del lengths
     torch.cuda.empty_cache()
     return result
 
@@ -90,26 +116,33 @@ def calc_writhe_parallel_cuda(xyz: torch.Tensor,
                               segments: torch.LongTensor,
                               use_cross: bool = True,
                               batch_size: int = None,
-                              multi_proc: bool = True) -> np.ndarray:
+                              multi_proc: bool = True,
+                              lengths: torch.Tensor = None) -> np.ndarray:
+
     batch_size = estimate_segment_batch_size(xyz) if batch_size is None else batch_size
 
     if batch_size > len(segments):
-        return writhe_batches_cuda(xyz, segments, use_cross=use_cross, device=0)
+        return writhe_batches_cuda(xyz, segments, use_cross=use_cross, device=0, lengths=lengths)
 
     split = math.ceil(len(segments) / batch_size)
     chunks = torch.tensor_split(segments, split)
 
     if len(segments) < 5 * batch_size or torch.cuda.device_count() == 1 or not multi_proc:
-        return writhe_batches_cuda(xyz, chunks, use_cross=use_cross, device=0)
+        return writhe_batches_cuda(xyz, chunks, use_cross=use_cross,
+                                   device=0, lengths=lengths)
 
     else:
+
         minibatches = split_list(chunks, torch.cuda.device_count())
-        return np.concatenate(Parallel(n_jobs=-1)(
-            delayed(writhe_batches_cuda)(xyz,
-                                         segments=j,
-                                         use_cross=use_cross,
-                                         device=i) for i, j in enumerate(minibatches)),
-            axis=-1)
+
+        with Parallel(n_jobs=len(minibatches)) as parallel:
+
+            result = parallel(delayed(writhe_batches_cuda)(xyz,
+                                                           segments=j,
+                                                           use_cross=use_cross,
+                                                           device=i,
+                                                           lengths=lengths) for i, j in enumerate(minibatches))
+        return np.concatenate(result[0], axis=-1)
 
 
 def to_writhe_matrix(writhe_features, n_points, length):
@@ -178,7 +211,8 @@ class Writhe:
                         cuda_batch_size: int,
                         multi_proc: bool,
                         use_cross: bool,
-                        cpu_method: str = "ray"
+                        cpu_method: str = "ray",
+                        lengths: np.ndarray = None
                         ) -> np.ndarray:
         """
         Perform the writhe computation using either CPU or GPU parallelization.
@@ -209,7 +243,10 @@ class Writhe:
                                              xyz=torch.from_numpy(xyz),
                                              batch_size=cuda_batch_size,
                                              multi_proc=multi_proc,
-                                             use_cross=use_cross)
+                                             use_cross=use_cross,
+                                             lengths=torch.from_numpy(lengths)\
+                                                 if lengths is not None else None
+                                             )
         else:
             if cuda:
                 print("You tried to use CUDA but it's not available according to torch, defaulting to CPUs.")
@@ -217,15 +254,25 @@ class Writhe:
                 return calc_writhe_parallel(segments=segments,
                                             xyz=xyz,
                                             cpus_per_job=cpus_per_job,
-                                            cpu_method=cpu_method)
+                                            cpu_method=cpu_method,
+                                            lengths=lengths)
             else:
                 warnings.warn("You are not using any multiprocessing or GPUs! "
                               "Multiprocessing on CPU is managed by ray or numba."
                               "ray handles big jobs best and is fastest!."
-                              ".... using torch broadcast calculation (returns numpy")
+                              ".... using torch broadcast calculation (returns numpy)")
+                if lengths is not None:
+                    lengths = torch.from_numpy(lengths)
+                    periodic = True
+                else:
+                    lengths = torch.empty(0)
+                    periodic=False
+
                 return writhe_segments(segments=torch.from_numpy(segments).long(),
                                        xyz=torch.from_numpy(xyz),
-                                       use_cross=use_cross).numpy()
+                                       use_cross=use_cross,
+                                       lengths=lengths,
+                                       periodic=periodic).numpy()
 
     def compute_writhe(self,
                        length: int = None,
@@ -240,7 +287,8 @@ class Writhe:
                        cuda_batch_size: Optional[int] = None,
                        multi_proc: bool = True,
                        use_cross: bool = True,
-                       cpu_method: str = "ray"
+                       cpu_method: str = "ray",
+                       lengths: np.ndarray = None
                        ) -> Optional[dict]:
         """
         Compute writhe at the specified segment length.
@@ -284,7 +332,8 @@ class Writhe:
                                          cpus_per_job=cpus_per_job,
                                          cuda=cuda, cuda_batch_size=cuda_batch_size,
                                          multi_proc=multi_proc, use_cross=use_cross,
-                                         cpu_method=cpu_method)
+                                         cpu_method=cpu_method,
+                                         lengths=lengths)
             return None
 
         results = dict(length=length,
@@ -296,7 +345,8 @@ class Writhe:
                                                           cpus_per_job=cpus_per_job,
                                                           cuda=cuda, cuda_batch_size=cuda_batch_size,
                                                           multi_proc=multi_proc, use_cross=use_cross,
-                                                          cpu_method=cpu_method)
+                                                          cpu_method=cpu_method,
+                                                          lengths=lengths)
 
         results["segments"] = segments
 
@@ -400,6 +450,8 @@ class Writhe:
                            font_scale: float = 1,
                            cmap: Optional[str] = None,
                            ax: Optional[plt.Axes] = None,
+                           cbar_label: Optional[str]= None,
+                           vmax: Optional[float] = None,
                            #rotation: Optional[float] = 90,
                            weights: Optional[np.ndarray] = None) -> None:
         """
@@ -441,13 +493,15 @@ class Writhe:
         if absolute:
             mat = np.abs(mat)
             cmap = "Reds" if cmap is None else cmap
-            cbar_label = "Absolute Writhe"
+            cbar_label = "Absolute Writhe" if cbar_label is None else cbar_label
             norm = None
 
         # can't define norm until we know if it's a mean or not. if abs, then norm isn't needed
         if index is None:
             mat = mean(mat, weights=weights)
             title = "Average Writhe Matrix"
+            if dscr is not None:
+                title += f': {dscr}'
         else:
             assert index is not None, "If not plotting average, must specify index to plot"
             index = to_numpy(index).astype(int)
@@ -467,10 +521,10 @@ class Writhe:
                     title = f"Average Writhe Matrix: {dscr}"
 
         if not absolute:
-            vmax = abs(mat).max()
+            vmax = abs(mat).max() if vmax is None else vmax
             norm = matplotlib.colors.TwoSlopeNorm(vcenter=0, vmin=-1 * vmax, vmax=vmax)
             cmap = "seismic" if cmap is None else cmap
-            cbar_label = "Writhe"
+            cbar_label = "Writhe" if cbar_label is None else cbar_label
 
         if ax is None:
             fig, ax = plt.subplots(1)

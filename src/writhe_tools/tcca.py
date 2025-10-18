@@ -106,7 +106,7 @@ class CCA:
 
             assert x in "x0,x1".split(","), "if x is str, input should be str(x0 or x1)"
 
-            v = getattr(self, f"v{x[-1]}")[:dim]
+            v = getattr(self, f"v{x[-1]}")[:, :dim]
 
             if scale:
                 v = v * self.svals[:dim]

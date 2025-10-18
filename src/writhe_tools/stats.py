@@ -4,11 +4,11 @@ from .utils.indexing import (group_by,
                              reindex_list,
                              product,
                              combinations)
-from .utils.misc import optional_import, to_numpy
+from .utils.misc import optional_import
 
 scipy = optional_import('scipy', 'stats' )
 
-from typing import List, Union, Any
+#from typing import List, Union, Any
 from functools import partial
 import warnings
 import multiprocessing
@@ -30,6 +30,27 @@ def inception_distance(x, y, ax: int = 0):
     mu_x, mu_y = (mean(i, ax=ax) for i in (x, y))
     Cx, Cy = (cov(i - mu, shift=False) for i, mu in zip((x, y), (mu_x, mu_y)))
     return np.linalg.norm(mu_x - mu_y)**2 + np.trace(Cx + Cy - 2 * sqrtm(Cx @ Cy).real)
+
+def pooled_sd(means: "1d array of trial means",
+              sds: "1d array of trial sds",
+              n_samples: "1d array of the number of samples used to estimate each sd and mean" = None,
+              ):
+    """
+    For combining standard deviations.
+
+
+    Can be used for combining standard deviations estimated from datasets with differing number of samples.
+
+    If n_samples if None or a constant, then it's assumed that the number of samples is the same for all SDs and cancels out of the sum and reduces to the number of standard deviations
+    being combined. As a result, this parameter can be left as None if all standard deviations are estimated using the same number of samples
+
+    """
+    if isinstance(n_samples, (float, int)) or n_samples is None:
+        # in this case the number of samples cancels out
+        return np.sqrt((sds ** 2 + (means - means.mean()) ** 2).sum() / len(means))
+    else:
+        n = n_samples.sum()
+        return np.sqrt((n_samples * (sds ** 2 + (means - means.mean()) ** 2)).sum() / n)
 
 
 def window_average(x, N):
@@ -143,8 +164,7 @@ def std(x: np.ndarray,
 
         shape = (1 if i != ax else x.shape[i] for i in range(len(x.shape)))
 
-    return np.sqrt(np.sum(weights.reshape(*shape)
-                          * center(x, weights) ** 2,
+    return np.sqrt(np.sum(weights.reshape(*shape) * center(x, weights) ** 2,
                           axis=ax) / N)
 
 

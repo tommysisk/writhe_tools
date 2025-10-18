@@ -4,6 +4,11 @@ import matplotlib.pyplot as plt
 import matplotlib
 from itertools import chain
 from typing import Union, Optional, List
+from matplotlib.patches import Rectangle
+from matplotlib import gridspec
+
+
+
 #from .stats import pmf
 from .utils.indexing import to_numpy
 
@@ -69,63 +74,89 @@ def box_plot(values: np.ndarray,
              color_list: list = None,
              title: str = None,
              ax=None,
-             figsize: tuple=(10, 6),
+             figsize: tuple = (10, 6),
              font_scale: float = 5,
              label_stride: int = 1,
-             capsize: float = 10,
-             error_capsize: float = 10,
-             error_linewidth: float = 3,
+             error_capsize: float = 5,
+             error_capthick: float = 1,
+             error_linewidth: float = 0.5,
+             error_color: str = 'gray',
              width: float = .95,
              linewidth: float = 1,
              edgecolor: str = "black",
              alpha: float = 1,
-             trunc: int = 25,
-             pre_trunc: int = 25,
-             rotation: float = 0):
-    values, errors = [i.squeeze() if i is not None else None for i in [values, errors]]
+             trunc: float = 0,
+             pre_trunc: float = 0,
+             rotation: float = 0,
+             vert: bool = True):
+    values, errors = [i.squeeze() if i is not None and isinstance(i, np.ndarray) else i for i in [values, errors]]
+    values = to_numpy(values)
     assert len(values.shape) == 1, "Need a set of values that can be squeezed to one dimension"
 
     nstates = len(values)
     labels = np.arange(1, nstates + 1).astype(str) if labels is None else labels
     assert len(labels) == nstates, "Length of values and labels must be the same"
 
-    # Choose colors based on height if color_height is True
     if color_height:
         norm = plt.Normalize(vmin=values.min(), vmax=values.max())
         cmap_fn = plt.get_cmap(cmap) if isinstance(cmap, str) else cmap
         color_list = [cmap_fn(norm(val)) for val in values]
     else:
-        color_list = get_color_list(nstates, cmap, trunc, pre_trunc) if color_list is None\
-                     else color_list
+        color_list = plt.get_cmap(cmap)(np.linspace(pre_trunc, 1 - trunc, nstates))\
+                     if color_list is None else color_list
 
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=figsize)
 
-    ax.bar(labels.astype(str),
-           values,
-           yerr=errors,
-           ecolor="grey",
-           color=color_list,
-           capsize=capsize,
-           width=width,
-           linewidth=linewidth,
-           edgecolor=edgecolor,
-           align="center",
-           alpha=alpha,
-           error_kw=dict(capthick=error_capsize, lw=error_linewidth),
-           label=label,
-           )
+    x_pos = np.arange(nstates)
 
-    ax.set_xticks(ticks=np.arange(0, nstates, label_stride), labels=labels[::label_stride])
-    ax.set_xlabel(xlabel, size=6 * font_scale)
-    ax.set_ylabel(ylabel, size=6 * font_scale)
+    if vert:
+        ax.bar(x_pos,
+               values,
+               yerr=errors,
+               ecolor=error_color,
+               color=color_list,
+               capsize=error_capsize,
+               width=width,
+               linewidth=linewidth,
+               edgecolor=edgecolor,
+               align="center",
+               alpha=alpha,
+               error_kw=dict(capthick=error_capthick, lw=error_linewidth),
+               label=label)
+        ax.set_xticks(ticks=x_pos[::label_stride], labels=labels[::label_stride])
+        ax.set_xlabel(xlabel, size=6 * font_scale)
+        ax.set_ylabel(ylabel, size=6 * font_scale)
+        ax.set_ylim(bottom=ymin, top=ymax)
+        ax.set_xlim([-.5, nstates - .5])
+        ax.tick_params("x", labelrotation=rotation)
+    else:
+        ax.barh(x_pos,
+                values,
+                xerr=errors,
+                ecolor=error_color,
+                color=color_list,
+                capsize=error_capsize,
+                height=width,
+                linewidth=linewidth,
+                edgecolor=edgecolor,
+                align="center",
+                alpha=alpha,
+                error_kw=dict(capthick=error_capthick, lw=error_linewidth),
+                label=label)
+        ax.set_yticks(ticks=x_pos[::label_stride], labels=labels[::label_stride])
+        ax.set_ylabel(xlabel, size=6 * font_scale)
+        ax.set_xlabel(ylabel, size=6 * font_scale)
+        ax.set_xlim(left=ymin, right=ymax)
+        ax.set_ylim([-.5, nstates - .5])
+        ax.tick_params("y", labelrotation=rotation)
+
     ax.set_title(title, size=6 * font_scale)
-    ax.set_ylim(bottom=ymin, top=ymax)
     ax.tick_params("both", labelsize=6 * font_scale)
-    ax.tick_params("x", labelrotation=rotation)
-    ax.set_xlim([-.5, nstates - .5])
 
     return ax
+
+
 
 
 def get_color_list(n_colors: int, cmap: str, trunc=0, pre_trunc=0):
@@ -142,8 +173,11 @@ def truncate_colormap(cmap: str, minval=0.0, maxval=1.0, n=100):
     return new_cmap
 
 
+from mpl_toolkits.axes_grid1 import make_axes_locatable, axes_size
+
 def annotated_matrix_plot(matrix: np.ndarray,
                           error_matrix: np.ndarray = None,
+                          color_matrix: np.ndarray = None,
                           title: str = "Transition Matrix",
                           xlabel=r"$State_{i}$",
                           ylabel=r"$State_{j}$",
@@ -152,34 +186,55 @@ def annotated_matrix_plot(matrix: np.ndarray,
                           textcolor: str = "white",
                           cmap="viridis",
                           tick_labels: list = None,
+                          xticks: list = None,
+                          yticks: list = None,
+                          xticks_rotation: list = 0,
                           val_text_size: int = 40,
                           err_text_size: int = 40,
                           vmin: float = None,
                           vmax: float = None,
                           decimals: int = 2,
                           font_scale: float = 1,
-                          figsize: float = 20,
+                          figsize: tuple = (10, 10),
                           round_int=False,
                           alpha: float = 1,
-                          ax=None):
+                          norm = None,
+                          ax=None,
+                          grid: bool = False,
+                          grid_spacing: int = 1,
+                          grid_alpha: float = 0.3,
+                          grid_color: str = "black",
+                          grid_linewidth: float = 0.8,
+                          xticks_top: bool = False):   # <-- new argument
     """
-
-    mat = square matrix
-    error_matrix = matrix of same dim as mat with errors of values in mat
-    unit = string specifying the units
-
+    matrix: data to display (rectangular or square).
+    error_matrix: optional error values of same shape.
+    tick_labels: default labels (overridden by xticks/yticks if provided).
+    xticks/yticks: optional labels for x/y axes.
+    xticks_top: bool. If True, x-axis ticks will be shown on the top.
     """
 
     if ax is None:
-        fig, ax = plt.subplots(1, figsize=(figsize, figsize))
+        fig, ax = plt.subplots(1, figsize=figsize)
 
-    s = ax.imshow(matrix, cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha)
+    n, m = matrix.shape
 
-    if tick_labels is None:
-        tick_labels = [f"{i + 1}" for i in range(matrix.shape[0])]
+    # Display matrix without stretching aspect ratio
+    s = ax.imshow(matrix if color_matrix is None else color_matrix,
+                  cmap=cmap, vmin=vmin,
+                  vmax=vmax, alpha=alpha,
+                  aspect='auto', norm=norm)
 
-    for i in range(len(matrix)):
-        for j in range(len(matrix)):
+    # Handle ticks
+    default_labels_x = [f"{i + 1}" for i in range(matrix.shape[1])]
+    default_labels_y = [f"{i + 1}" for i in range(matrix.shape[0])]
+
+    xtick_labels = xticks if xticks is not None else (tick_labels or default_labels_x)
+    ytick_labels = yticks if yticks is not None else (tick_labels or default_labels_y)
+
+    # Add value + error annotations
+    for i in range(matrix.shape[1]):  # loop over x
+        for j in range(matrix.shape[0]):  # loop over y
             if round_int:
                 val = str(int(matrix[j, i]))
                 if error_matrix is not None:
@@ -189,7 +244,8 @@ def annotated_matrix_plot(matrix: np.ndarray,
                 if error_matrix is not None:
                     err = str(round(error_matrix[j, i], decimals))
 
-            ax.text(i, j, f"{val + (' ' + unit if error_matrix is None else '')}",  # weird behavior
+            ax.text(i, j,
+                    f"{val + (' ' + unit if error_matrix is None else '')}",
                     va='center', ha='center',
                     color=textcolor, size=val_text_size * font_scale,
                     weight="bold")
@@ -199,42 +255,79 @@ def annotated_matrix_plot(matrix: np.ndarray,
                         va='center', ha='center', color=textcolor,
                         size=err_text_size * font_scale, weight="bold")
 
-    ax.set_yticks(list(range(len(matrix))), tick_labels, size=35 * font_scale)
-    ax.set_xticks(list(range(len(matrix))), tick_labels, size=35 * font_scale)
-    ax.set_ylabel(r"$State_{i}$" if xlabel is None else xlabel, size=45 * font_scale)
-    ax.set_xlabel(r"$State_{j}$" if ylabel is None else ylabel, size=45 * font_scale)
-    cb = plt.colorbar(s, ax=ax, label=cbar_label, fraction=0.046, pad=0.04)
+    # Axis labels and ticks
+    ax.set_xticks(list(range(matrix.shape[1])), xtick_labels, size=35 * font_scale, rotation=xticks_rotation)
+    ax.set_yticks(list(range(matrix.shape[0])), ytick_labels, size=35 * font_scale)
+    ax.set_xlabel(xlabel, size=45 * font_scale)
+    ax.set_ylabel(ylabel, size=45 * font_scale)
+
+    if xticks_top:
+        ax.xaxis.set_ticks_position('top')
+        ax.xaxis.set_label_position('top')
+
+    if grid:
+        for i in range(0, n, grid_spacing):
+            for j in range(0, m, grid_spacing):
+                ax.add_patch(Rectangle(
+                    (j - 0.5, i - 0.5),
+                    width=grid_spacing,
+                    height=grid_spacing,
+                    edgecolor=grid_color,
+                    facecolor='none',
+                    lw=grid_linewidth,
+                    alpha=grid_alpha
+                ))
+
+    # Automatic colorbar aligned to the matrix height
+    divider = make_axes_locatable(ax)
+    cb_width = axes_size.AxesY(ax, aspect=1./20)  # width = 1/20 of matrix height
+    pad = axes_size.Fraction(0.2, cb_width)
+    cax = divider.append_axes("right", size=cb_width, pad=pad)
+
+    cb = ax.figure.colorbar(s, cax=cax)
     cb.set_label(cbar_label, size=40 * font_scale)
     cb.ax.tick_params(labelsize=30 * font_scale)
+
     ax.set_title(title, size=45 * font_scale)
-    return
+    return ax
+
 
 
 def plot_distance_matrix(matrix: np.ndarray,
-                         xlabel: str = None,
-                         xlabel_rotation: float = None,
+                         xlabel: Optional[str] = None,
+                         xlabel_rotation: Optional[float] = None,
                          ylabel_rotation: float = 90,
-                         ylabel: str = None,
-                         xticks: "list or np.ndarray" = None,
-                         yticks: "list or np.ndarray" = None,
+                         ylabel: Optional[str] = None,
+                         xticks: Optional[Union[list, np.ndarray]] = None,
+                         yticks: Optional[Union[list, np.ndarray]] = None,
                          xticks_rotation: float = 0,
-                         yticks_rotation: float = None,
-                         label_stride: int = None,
-                         title: str = None,
+                         yticks_rotation: Optional[float] = None,
+                         label_stride: int = 1,
+                         title: Optional[str] = None,
                          cbar: bool = True,
                          cmap: str = "jet",
-                         cbar_label: str = None,
+                         cbar_label: Optional[str] = None,
                          cbar_label_rotation: float = -90,
-                         vmin: float = None,
-                         vmax: float = None,
+                         vmin: Optional[float] = None,
+                         vmax: Optional[float] = None,
                          alpha: float = 1,
-                         alpha_lines: float = 0,
-                         norm: bool = None,
-                         aspect: str = None,
+                         #alpha_lines: float = 0,
+                         norm: Optional[plt.Normalize] = None,
+                         aspect: Optional[str] = None,
                          font_scale: float = 1,
-                         ax=None,
+                         ax: Optional[plt.Axes] = None,
+                         figsize: Optional[tuple] = None,
                          hide_x: bool = False,
-                         invert_yaxis: bool = True):
+                         hide_y: bool = False,
+                         invert_yaxis: bool = True,
+                         grid: bool = False,
+                         grid_spacing: int = 1,
+                         grid_alpha: float = 0.3,
+                         grid_color: str = "black",
+                         grid_linewidth: float = 0.8,
+                         file: str = None,
+                         dpi: float = 1000):
+
     assert matrix.ndim == 2, "Must be 2d matrix"
     n, m = matrix.shape
     args = locals()
@@ -242,12 +335,14 @@ def plot_distance_matrix(matrix: np.ndarray,
     cmap = getattr(plt.cm, cmap)
 
     if ax is None:
-        fig, ax = plt.subplots(1)
+        fig, ax = plt.subplots(1, figsize=figsize)
+    else:
+        fig = ax.figure
 
     s = ax.imshow(matrix, cmap=cmap, aspect=aspect,
                   norm=norm, vmax=vmax, vmin=vmin,
-                  alpha=alpha,
-                  )
+                  alpha=alpha)
+
     ax.set_title(label=title, size=10 * font_scale)
     ax.tick_params(size=3 * font_scale, labelsize=7 * font_scale)
 
@@ -256,84 +351,70 @@ def plot_distance_matrix(matrix: np.ndarray,
 
     ax.set_ylabel(ylabel=ylabel, size=10.2 * font_scale,
                   rotation=ylabel_rotation, labelpad=13 + font_scale)
+
     if cbar:
         cbar = plt.colorbar(s, ax=ax, label=cbar_label,
-                            fraction=0.046, pad=0.02,
-                            )
-
+                            fraction=0.046, pad=0.02)
         cbar.set_label(cbar_label, rotation=cbar_label_rotation,
                        size=10 * font_scale, labelpad=12 + np.exp(font_scale))
-
         cbar.ax.tick_params(labelsize=8 * font_scale)
-
-
-    ###############
 
     for i, (key, n_points) in enumerate(zip(["yticks", "xticks"], (n, m))):
         if args[key] is not None:
             assert isinstance(args[key], (np.ndarray, list)), \
                 "ticks arguments must be list or np.ndarray"
-
-            labels = to_numpy(args[key]).squeeze()
-
-            assert n_points == len(labels), \
-                (f"{key} don't match the number of points used to compute writhe"
-                 "The number of points (n_points) used to compute writhe should be equal to the number of tick labels."
-                 "This method will correctly handle tick labels to account for the length used to compute writhe")
-
+            labels = np.asarray(args[key]).squeeze()
+            assert n_points == len(labels), (
+                f"{key} don't match the number of points used to compute writhe"
+                "The number of points (n_points) used to compute writhe should be equal to the number of tick labels."
+            )
         else:
             labels = np.arange(0, n_points)
-
-        labels = labels[np.linspace(0,
-                                    n_points - 1,
-                                    (n_points - 1) // label_stride).astype(int)]
-
+        if not label_stride == 1:
+            labels = labels[np.linspace(0,
+                                        n_points - 1,
+                                        (n_points - 1) // label_stride).astype(int)]
         ticks = np.linspace(0,
-                            n_points -  1,
+                            n_points - 1,
                             len(labels))
-
         _ = getattr(ax, f"set_{key}")(ticks=ticks,
                                       labels=labels,
                                       rotation=args[f"{key}_rotation"])
 
-
-
-
-
-
-
-
-
-
-
-
-    # for dim, key in zip([m, n], ["xticks", "yticks"]):
-    #
-    #
-    #     val = args[key]
-    #     if val is not None:
-    #         assert len(val) == dim, f"{key} don't match matrix dimension"
-    #
-    #         loc = np.arange(0, len(val))[::label_stride]
-    #         val = val[::label_stride]
-    #
-    #         _ = getattr(ax, f"set_{key}")(loc,
-    #                                       val,
-    #                                       rotation=args[f"{key}_rotation"])
     if hide_x:
-        ax.tick_params(axis='x',  # changes apply to the x-axis
-                       which='both',  # both major and minor ticks are affected
-                       bottom=False,  # ticks along the bottom edge are off
-                       top=False,  # ticks along the top edge are off
-                       labelbottom=False,
-                       size=0)
-
+        ax.tick_params(axis='x', which='both',
+                       bottom=False, top=False,
+                       labelbottom=False, size=0)
         ax.set_xlabel("", labelpad=0, size=0)
+
+    if hide_y:
+        ax.tick_params(axis='y', which='both',
+                       left=False, right=False,     # use left/right instead of bottom/top
+                       labelleft=False, size=0)     # use labelleft for y-axis
+        ax.set_ylabel("", labelpad=0, size=0)
 
     if invert_yaxis:
         ax.invert_yaxis()
 
+    # ✅ Pixel-aligned grid using Rectangle patches
+    if grid:
+        for i in range(0, n, grid_spacing):
+            for j in range(0, m, grid_spacing):
+                ax.add_patch(Rectangle(
+                    (j - 0.5, i - 0.5),
+                    width=grid_spacing,
+                    height=grid_spacing,
+                    edgecolor=grid_color,
+                    facecolor='none',
+                    lw=grid_linewidth,
+                    alpha=grid_alpha
+                ))
+    if file is not None:
+        fig.savefig(file, bbox_inches='tight', dpi=dpi)
+
     return s
+
+
 
 
 def lineplot1D(y,
@@ -343,9 +424,11 @@ def lineplot1D(y,
                color: str = None,
                ls: str = None,
                lw: float = None,
+               alpha: float = None,
                marker: str = None,
                mfc: str = None,
                mec: str = None,
+               ms: float = 1,
                fill_color: str = None,
                fill_alpha: float = None,
                title: str = None,
@@ -367,7 +450,9 @@ def lineplot1D(y,
                hide_title: bool = False,
                figsize: tuple = None,
                yscale: str = 'linear',
+               legend: bool = False,
                ax=None,
+               top_xticks: "list or np.ndarray" = None,
                ):
 
     args = locals()
@@ -399,9 +484,10 @@ def lineplot1D(y,
 
     s = ax.plot(x, y, color=color, ls=ls,
                 lw=lw, marker=marker,
-                mfc=mfc, mec=mec, label=label)
+                mfc=mfc, mec=mec,
+                label=label, ms=ms, alpha=alpha)
 
-    if label is not None:
+    if (label is not None) and legend:
         ax.legend()
 
     if fill_color is not None or all(i is not None for i in (y1, y2)):
@@ -412,26 +498,61 @@ def lineplot1D(y,
 
     ax.set_yscale(yscale)
 
-    for dim, key in zip([m, n], ["xticks", "yticks"]):
-        val = args[key]
-        if val is not None:
-            assert len(val) == dim, f"{key} don't match matrix dimension"
+    # noinspection DuplicatedCode
+    for i, (key, n_points) in enumerate(zip(["xticks"], [m])):
+        if args[key] is not None:
+            assert isinstance(args[key], (np.ndarray, list)), \
+                "ticks arguments must be list or np.ndarray"
+            labels = np.asarray(args[key]).squeeze()
+            assert n_points == len(labels), (
+                f"{key} don't match the number of points used to compute writhe"
+                "The number of points (n_points) used to compute writhe should be equal to the number of tick labels."
+            )
+        else:
+            labels = np.arange(0, n_points)
+        if not label_stride == 1:
+            labels = labels[np.linspace(0,
+                                        n_points - 1,
+                                        (n_points - 1) // label_stride).astype(int)]
+        ticks = np.linspace(0,
+                            n_points - 1,
+                            len(labels))
+        _ = getattr(ax, f"set_{key}")(ticks=ticks,
+                                      labels=labels,
+                                      rotation=args[f"{key}_rotation"])
 
-            labels = val[np.linspace(0,
-                                     len(val) - 1,
-                                     (len(val) - 1) // label_stride
-                                     ).astype(int)]
+    # Optional evenly spaced aesthetic labels on the TOP x-axis
+    if top_xticks is not None:
+        assert isinstance(top_xticks, (np.ndarray, list)), \
+            "top_xticks must be list or np.ndarray"
+        top_labels = np.asarray(top_xticks).squeeze()
+        top_ticks = np.linspace(0, m - 1, len(top_labels))
 
-            ticks = np.linspace(0,
-                                len(val) - 1,
-                                len(labels))
+        ax_top = ax.secondary_xaxis('top')
+        ax_top.set_xticks(top_ticks, labels=top_labels, rotation=xticks_rotation)
+        ax_top.tick_params(axis='x', size=3 * font_scale, labelsize=12 * font_scale)
 
-            _ = getattr(ax, f"set_{key}")(ticks,
-                                          labels,
-                                          rotation=args[f"{key}_rotation"],
-                                          )
+    # for dim, key in zip([m, n], ["xticks", "yticks"]):
+    #     val = args[key]
+    #     if val is not None:
+    #         assert len(val) == dim, f"{key} don't match matrix dimension"
+    #
+    #         labels = val[np.linspace(0,
+    #                                  len(val) - 1,
+    #                                  (len(val) - 1) // label_stride
+    #                                  ).astype(int)]
+    #
+    #         ticks = np.linspace(0,
+    #                             len(val) - 1,
+    #                             len(labels))
+    #
+    #         _ = getattr(ax, f"set_{key}")(ticks,
+    #                                       labels,
+    #                                       rotation=args[f"{key}_rotation"],
+    #                                       )
 
     return s
+
 
 
 def build_grid_plot(matrix_args: dict,
@@ -648,7 +769,7 @@ def subplots_fes2d(x: np.ndarray,
                    cols: int,
                    dscrs: list,
                    indices_list: list = None,
-                   y: np.ndarray = None,
+                   #y: np.ndarray = None,
                    ylabel=None,
                    xlabel=None,
                    title: str = None,
@@ -677,13 +798,15 @@ def subplots_fes2d(x: np.ndarray,
                    scatter_min: float = 0.2,
                    scatter_max: float = 0.8,
                    figsize: tuple = (6, 5)):
-    x = np.stack([x, y], -1) if y is not None else x
+
+    #x = np.stack([x, y], -1) if y is not None else x
 
     indices_list = list(range(len(x))) if indices_list is None else indices_list
 
-    extent = ([get_extrema(i, extend_border) for i in x.T] if isinstance(x, np.ndarray) \
-                  else [get_extrema(i, extend_border) for i in np.concatenate(x).T]) if extent is None and share_extent \
-        else extent
+    if extent is None:
+        extent = [get_extrema(i, extend_border) for i in x.T] if isinstance(x, np.ndarray) \
+                  else [get_extrema(i, extend_border) for i in np.concatenate(x).T] if share_extent \
+                  else extent
 
     fig, axes = plt.subplots(rows, cols, sharey=sharey, sharex=sharex, figsize=figsize)
 
@@ -851,6 +974,7 @@ def proj2d(x: np.ndarray,
                                 ticks=np.linspace(c0, c1, 4, endpoint=True),
                                 norm=cbar_norm)
             cbar.set_label(cbar_label, size=12 * font_scale)
+
         cbar.ax.tick_params(labelsize=9 * font_scale)
 
     else:
@@ -886,15 +1010,15 @@ def proj2d(x: np.ndarray,
     return s
 
 
-def subplots_proj2d(x: np.ndarray,
-                    c: np.ndarray,
+def subplots_proj2d(x: Optional[Union[np.ndarray, list]],
+                    c: Optional[Union[np.ndarray, list]],
                     rows: int,
                     cols: int,
                     dscrs: list,
                     indices_list: list = None,
                     cmap: str = "jet",
                     dot_size: float = 0.5,
-                    y: np.ndarray = None,
+                    #y: np.ndarray = None,
                     ylabel=None,
                     xlabel=None,
                     title: str = None,
@@ -909,36 +1033,56 @@ def subplots_proj2d(x: np.ndarray,
                     bins: int = 100,
                     aspect: str = "auto",
                     figsize: tuple = None,
+                    extent: tuple = None,
+                    alpha=None
                     ):
-    x = np.stack([x, y], -1) if y is not None else x
-
-    c = c.squeeze()
+    #x = np.stack([x, y], -1) if y is not None else x
 
     if indices_list is None:
-        if x.ndim == 3:
-            indices_list = list(range(len(x)))
+        if isinstance(x, np.ndarray):
+            if x.ndim == 3:
+                indices_list = list(range(len(x)))
+            else:
+                # Same coordinates, different colors
+                assert x.ndim == 2, "x must be 2 or 3 dimensional"
+                indices_list = len(c) * [None]
+
+        if isinstance(x, list):
+            if len(x) > 1:
+                indices_list = list(range(len(x)))
+
+
+    if isinstance(c, np.ndarray):
+        if c.ndim == 2:
+            assert c.shape[0] == len(indices_list),\
+                "If each plot has a different coloring, number must match number of datasets"
+            color_indices = list(range(len(c)))
         else:
-            assert x.ndim == 2, "x must be 2 or 3 dimensional"
-            indices_list = len(c) * [None]
-
-    if c.ndim == 2:
-        assert c.shape[0] == len(
-            indices_list), "If each plot has a different coloring, number must match number of datasets"
-        color_indices = list(range(len(c)))
+            # different coordinates, same colors
+            assert c.ndim == 1, "c must be 1 or two dimensional"
+            color_indices = len(indices_list) * [None]
     else:
-        assert c.ndim == 1, "c must be 1 or two dimensional"
-        color_indices = len(indices_list) * [None]
+        assert len(c) == len(indices_list) and isinstance(c, list), 'List of values for colors (c) must match length of indices_list'
 
-    extent = list(map(get_extrema, x.T)) if share_extent else None
+        color_indices = list(range(len(c)))
+
+
+    if extent is None:
+        extent = [get_extrema(i) for i in x.T] if isinstance(x, np.ndarray) \
+            else [get_extrema(i) for i in np.concatenate(x).T] if share_extent \
+            else extent
 
     figsize = (2 * cols, 1.5 * rows) if figsize is None else figsize
 
-    fig, axes = plt.subplots(rows, cols, sharey=sharey, sharex=sharex, figsize=figsize, constrained_layout=False)
+    fig, axes = plt.subplots(rows, cols, sharey=sharey, sharex=sharex,
+                             figsize=figsize, constrained_layout=False)
 
     # if isinstance(cbar_label, str):
     #     cbar_label = len(indices_list) * [cbar_label]
     # else:
     #     assert isinstance(cbar_label, list) and (len(cbar_label) == len(indices_list))
+    c0, c1 = get_extrema(np.concatenate(c))
+    c0, c1 = c0 if vmin is None else vmin, c1 if vmax is None else vmax
 
     for ax, indices, color_index, dscr in zip(axes.flat, indices_list, color_indices, dscrs):
         s = proj2d(x[indices],
@@ -952,15 +1096,16 @@ def subplots_proj2d(x: np.ndarray,
                    title=dscr,
                    ax=ax,
                    font_scale=font_scale,
-                   vmin=vmin,
-                   vmax=vmax,
+                   vmin=c0,
+                   vmax=c1,
                    cbar_shrink=1,
-                   aspect=aspect)
+                   aspect=aspect,
+                   alpha=alpha)
         # ax.set_aspect(aspect)
 
     fig.subplots_adjust(right=1.05, top=.82, bottom=.18)
-    fmtr = lambda x, _: f"{x:.3f}"
-    c0, c1 = c.min(), c.max()
+    fmtr = lambda x, _: f"{x:.1f}"
+
     cbar = fig.colorbar(s,
                         format=fmtr,
                         orientation='vertical',
@@ -980,5 +1125,165 @@ def subplots_proj2d(x: np.ndarray,
     # fig.suptitle(title, y=1+title_pad, x = .5 - x_offset, size=(100/6) * font_scale)
     fig.supylabel(ylabel, size=20 * font_scale)
     fig.supxlabel(xlabel, size=20 * font_scale)
-    fig.suptitle(title, size=20 * font_scale)
+    fig.suptitle(title, size=20 * font_scale, y = 1 + title_pad)
     return
+
+
+
+def build_matrix_boxplot_grid(matrix: np.ndarray,
+                              bottom_values: np.ndarray,
+                              left_values: np.ndarray,
+                              title: str = None,
+                              title_size: int = 20,
+                              left_title: str = None,
+                              bottom_title: str = None,
+                              marginal_max: int = None,
+                              cmap: str = "jet",
+                              figsize: tuple = (6, 6),
+                              wspace: float = 0.05,
+                              hspace: float = 0.05,
+                              width_ratios: tuple = (1, 4, 0.15),
+                              height_ratios: tuple = (1, 4, 1),
+                              vmin: float = 0,
+                              vmax: float = 1,
+                              cbar_label: str = None,
+                              ticks: list = None,
+                              n_yticks: int = 3,
+                              left_errors: np.ndarray = None,
+                              bottom_errors: np.ndarray = None,
+                              ecolor: str = 'gray',
+                              outline: bool = True,
+                              outline_color: str = "gray",
+                              outline_lw: float = .8,
+                              outline_alpha: float = 0.3,
+                              path: str = None):
+    """
+    Heat‑map with marginal bar plots.
+
+    * Matrix panel: rectangle outlines around every pixel (no internal grid).
+    * Left / bottom bar panels: centred ticks only.
+    * Optional: error bars and box border highlighting
+    """
+    fig = plt.figure(figsize=figsize, constrained_layout=True)
+    spec = gridspec.GridSpec(ncols=3, nrows=3, figure=fig,
+                             width_ratios=width_ratios,
+                             height_ratios=height_ratios,
+                             wspace=wspace, hspace=hspace)
+
+    # ---------------------------------------------------------------- Matrix
+    ax_matrix = fig.add_subplot(spec[1, 1])
+    im = ax_matrix.imshow(matrix, aspect="auto", cmap=cmap,
+                          vmin=vmin, vmax=vmax, alpha=.85)
+    ax_matrix.tick_params(left=False, bottom=False,
+                          labelleft=False, labelbottom=False)
+    ax_matrix.invert_yaxis()
+    if title:
+        ax_matrix.set_title(title, size=title_size)
+
+    if outline:
+        nrows, ncols = matrix.shape
+        for i in range(nrows):
+            for j in range(ncols):
+                ax_matrix.add_patch(Rectangle(
+                    (j - 0.5, i - 0.5), 1, 1,
+                    edgecolor=outline_color,
+                    facecolor="none",
+                    lw=outline_lw,
+                    alpha=outline_alpha
+                ))
+
+    nrows, ncols = matrix.shape
+
+    # ---------------------------------------------------------- Left bar plot
+    ax_left = fig.add_subplot(spec[1, 0], sharey=ax_matrix)
+    bar_kwargs = dict(
+        color="indianred",
+        alpha=.85,
+        edgecolor="black",
+        linewidth=0.5
+    )
+
+    ax_left.barh(np.arange(nrows), left_values, **bar_kwargs)
+
+    if left_errors is not None:
+        ax_left.errorbar(left_values, np.arange(nrows), xerr=left_errors,
+                         fmt='none', ecolor=ecolor, capsize=2, lw=0.8)
+
+    left_max = max(vmax, bottom_values.max(), left_values.max()) if marginal_max is None else marginal_max
+    ax_left.set_xlim(vmin, left_max)
+    ax_left.invert_xaxis()
+    ax_left.xaxis.tick_top()
+    ax_left.yaxis.tick_right()
+    ax_left.minorticks_off()
+
+    xticks = np.linspace(vmin, left_max, 3)[:-1] if n_yticks == 2 else np.linspace(vmin, left_max, n_yticks)
+    ax_left.set_xticks(xticks)
+    ax_left.set_xticklabels(
+        [f"{x:.0f}" if x.is_integer() else f"{x:.1f}" for x in xticks],
+        fontsize=14
+    )
+    if left_title:
+        ax_left.set_ylabel(left_title, rotation=90, labelpad=8, size=18)
+        ax_left.yaxis.set_label_position("left")
+
+    # -------------------------------------------------------- Bottom bar plot
+    ax_bottom = fig.add_subplot(spec[2, 1], sharex=ax_matrix)
+    bar_kwargs = dict(
+        color="skyblue",
+        alpha=.6,
+        edgecolor="black",
+        linewidth=0.5
+    )
+
+    ax_bottom.bar(np.arange(ncols), bottom_values, **bar_kwargs)
+
+    if bottom_errors is not None:
+        ax_bottom.errorbar(np.arange(ncols), bottom_values, yerr=bottom_errors,
+                           fmt='none', ecolor=ecolor, capsize=2, lw=0.8)
+
+    bottom_max = max(vmax, bottom_values.max(), left_values.max()) if marginal_max is None else marginal_max
+    ax_bottom.set_ylim(vmin, bottom_max)
+    ax_bottom.minorticks_off()
+    ax_bottom.yaxis.tick_right()
+
+    yticks = np.linspace(vmin, bottom_max, 3)[:-1] if n_yticks == 2 else np.linspace(vmin, bottom_max, n_yticks)
+    ax_bottom.set_yticks(yticks)
+    ax_bottom.set_yticklabels(
+        [f"{y:.0f}" if y.is_integer() else f"{y:.1f}" for y in yticks],
+        fontsize=14
+    )
+    if bottom_title:
+        ax_bottom.set_xlabel(bottom_title, labelpad=8, size=18)
+        ax_bottom.xaxis.set_label_position("bottom")
+
+    # -------------------------------------------------------------- Colorbar
+    cax = fig.add_subplot(spec[1, 2])
+    cbar = fig.colorbar(im, cax=cax)
+    cbar.ax.tick_params(labelsize=14)
+    if cbar_label:
+        cbar.set_label(cbar_label, rotation=-90, labelpad=16, size=16)
+    cbar_ticks = np.linspace(im.norm.vmin, im.norm.vmax, 5)
+    cbar.set_ticks(cbar_ticks)
+    cbar.set_ticklabels([f"{t:.0f}" if t.is_integer() else f"{t:.1f}" for t in cbar_ticks])
+
+    # ---------------------------------------- Centre ticks on bar plots only
+    pos_x = np.arange(ncols)
+    pos_y = np.arange(nrows)
+    ax_left.set_yticks(pos_y)
+    ax_bottom.set_xticks(pos_x)
+
+    if ticks is not None:
+        ax_left.set_yticklabels(ticks,
+                                ha='left',
+                                va='center',
+                                fontsize=11)
+        ax_bottom.set_xticklabels(ticks, rotation=0, fontsize=12)
+    else:
+        ax_left.set_yticklabels([])
+        ax_bottom.set_xticklabels([])
+
+    plt.show()
+
+    if path is not None:
+        fig.savefig(path, dpi=1000, bbox_inches='tight')
+

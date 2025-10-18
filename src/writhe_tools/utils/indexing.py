@@ -133,6 +133,7 @@ def indices_stat(indices_list: list,
 def group_by(keys: np.ndarray,
              values: np.ndarray = None,
              reduction: callable = None,
+             return_keys: bool = False,
              key_axis: int = 0):
     """
     Performs grouping of the values based on keys and can perform an operation
@@ -146,16 +147,20 @@ def group_by(keys: np.ndarray,
     in order for this function to be used to count the number of
     times each key is seen.
     """
+    # if keys are multidimensional
     keys = np.unique(keys, axis=key_axis, return_inverse=True)[-1] if keys.ndim > 1 else keys
     if reduction is not None:
         values = np.ones_like(keys) if values is None else values.squeeze()
-        groups = [i[-1] for i in group_by_(keys=keys, values=values, reduction=reduction)]
-        return (np.stack(groups).squeeze() if len({i.shape for i in groups}) == 1 else groups) \
+        obj = group_by_(keys=keys, values=values, reduction=reduction)
+        groups = [i[-1] for i in obj]
+        groups = (np.stack(groups).squeeze() if len({i.shape for i in groups}) == 1 else groups) \
             if isinstance(groups[0], np.ndarray) else np.asarray(groups)
+        return groups if not return_keys else (groups, np.array([i[0] for i in obj]))
     else:
         values = np.arange(len(keys)) if values is None else values
-        return group_by_(keys).split_array_as_list(values)
-
+        obj = group_by_(keys)
+        return group_by_(keys).split_array_as_list(values) if not return_keys \
+            else (group_by_(keys).split_array_as_list(values), obj.unique)
 
 def product(x: np.ndarray, y: np.ndarray):
     return np.asarray(list(itertools.product(x, y)))

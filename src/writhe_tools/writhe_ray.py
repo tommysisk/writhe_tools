@@ -4,13 +4,40 @@ import functools
 import multiprocessing
 
 
+def pbc_correct(displacements: np.ndarray,
+                lengths: np.ndarray) -> np.ndarray:
+    """
+    Apply minimum image convention PBC correction to a (N, ..., 3) array
+    using per-frame box lengths of shape (N, 3).
+
+    Args:
+        displacements (np.ndarray): Array of shape (N, ..., 3)
+        lengths (np.ndarray): Array of shape (N, 3)
+
+    Returns:
+        np.ndarray: Corrected displacements, same shape as input.
+    """
+    if displacements.shape[0] != lengths.shape[0]:
+        raise ValueError("Batch dimension mismatch between displacements and lengths")
+    if displacements.shape[-1] != 3:
+        raise ValueError("Last dimension must be 3 (xyz coordinates)")
+
+    expand_dims = [1] * (displacements.ndim - 2)
+    lengths_broadcast = lengths.reshape(lengths.shape[0], *expand_dims, 3)
+
+    return displacements - lengths_broadcast * np.round(displacements / lengths_broadcast)
+
+
+
+
 def divnorm(x):
     return x / np.linalg.norm(x, axis=-1, keepdims=True)
 
 
 def writhe_segment(segment=None,
                    xyz=None,
-                   use_cross: bool = True):
+                   use_cross: bool = True,
+                   lengths=None):
     """
     Version of the writhe computation written specifically for CPU + ray parallelization.
     See writhe_tools.writhe_nn.writhe_segments for cleaner implementation that is generally more efficient.
@@ -24,12 +51,25 @@ def writhe_segment(segment=None,
 
     """
     xyz = xyz[None, :] if xyz.ndim < 3 else xyz
+
     # broadcasting trick
     # negative sign, None placement and order are intentional, don't change without testing equivalent option
-    dx = divnorm((-xyz[:, segment[:2], None] + xyz[:, segment[None, 2:]]).reshape(-1, 4, 3))
-    signs = np.sign(np.sum(dx[:, 0] * np.cross(xyz[:, segment[3]] - xyz[:, segment[2]],
-                                               xyz[:, segment[1]] - xyz[:, segment[0]], axis=-1),
-                           axis=-1)).squeeze()
+    dx = (-xyz[:, segment[:2], None] + xyz[:, segment[None, 2:]]).reshape(-1, 4, 3)
+
+    if lengths is not None:
+        dx = divnorm(pbc_correct(dx, lengths))
+
+        signs = np.sign(np.sum(dx[:, 0] * np.cross(pbc_correct(xyz[:, segment[3]] - xyz[:, segment[2]], lengths),
+                                                   pbc_correct(xyz[:, segment[1]] - xyz[:, segment[0]], lengths),
+                                                   axis=-1),
+                               axis=-1)).squeeze()
+    else:
+        dx = divnorm(dx)
+
+        signs = np.sign(np.sum(dx[:, 0] * np.cross(xyz[:, segment[3]] - xyz[:, segment[2]],
+                                                   xyz[:, segment[1]] - xyz[:, segment[0]], axis=-1),
+                               axis=-1)).squeeze()
+
     # for the following, array broadcasting is (surprisingly) slower than list comprehensions
     # when using ray!! (without ray, broadcasting is faster).
     if use_cross:
@@ -61,12 +101,14 @@ def writhe_segment(segment=None,
 def writhe_segments_along_axis(xyz: np.ndarray,
                                segments: np.ndarray,
                                use_cross: bool = True,
-                               axis: int = 1):
+                               axis: int = 1,
+                               lengths: np.ndarray = None):
     """helper function for parallelization to compute writhe over chuncks of segments for all frames in xyz"""
     # noinspection PyTypeChecker
     return np.apply_along_axis(func1d=functools.partial(writhe_segment,
                                                         xyz=xyz,
-                                                        use_cross=use_cross
+                                                        use_cross=use_cross,
+                                                        lengths=lengths
                                                         ),
                                axis=axis, arr=segments)
 
@@ -75,16 +117,21 @@ def writhe_segments_along_axis(xyz: np.ndarray,
 def writhe_segments_ray(xyz: np.ndarray,
                         segments: np.ndarray,
                          use_cross: bool = True,
-                         cpus_per_job: int = 1) -> "Nframes by Nsegments np.ndarray":
+                         cpus_per_job: int = 1,
+                         lengths: np.ndarray = None,
+                        ) -> "Nframes by Nsegments np.ndarray":
     """parallelize writhe calculation by segment, avoids making multiple copies of coordinate (xyz) matrix using Ray shared memory"""
     # ray.init()
 
     xyz_ref = ray.put(xyz)  # reference to coordinates that all child processes can access without copying
+    if lengths is not None:
+        lengths = ray.put(lengths)
     writhe_segments_along_axis_ref = ray.remote(writhe_segments_along_axis)
     chunks = np.array_split(segments, int(multiprocessing.cpu_count() / cpus_per_job))
     result = np.concatenate(ray.get([writhe_segments_along_axis_ref.remote(segments=chunk,
                                                                            xyz=xyz_ref,
-                                                                           use_cross=use_cross)
+                                                                           use_cross=use_cross,
+                                                                           lengths=lengths)
                                      for chunk in chunks])).T.squeeze()
     ray.internal.free(xyz_ref)
     ray.shutdown()

@@ -12,10 +12,35 @@ def divnorm(x: torch.Tensor):
     return x / (torch.linalg.norm(x, dim=-1, keepdim=True))
 
 
+
+@torch.jit.script
+def pbc_correct(displacements: torch.Tensor,
+                lengths: torch.Tensor) -> torch.Tensor:
+    """
+    TorchScript-compatible PBC correction for (N, ..., 3) displacements
+    using box lengths (N, 3).
+    """
+    # Check assumptions manually if needed, since TorchScript ignores assert
+    # assert displacements.shape[-1] == 3
+
+    ndims = displacements.ndim
+    N = displacements.shape[0]
+
+    # Compute the number of intermediate dims
+    expand_dims = [1] * (ndims - 2)  # same as torch.ones(...).shape[:-1]
+    new_shape = [N] + expand_dims + [3]
+
+    lengths_broadcast = lengths.view(new_shape)
+    return displacements - lengths_broadcast * torch.round(displacements / lengths_broadcast)
+
+
+
 @torch.jit.script
 def writhe_segments(xyz: torch.Tensor,
                     segments: torch.Tensor,
-                    use_cross: bool = True):
+                    use_cross: bool = True,
+                    periodic: bool = False,
+                    lengths: torch.Tensor = torch.empty(0)):
     """
     Compute the writhe (signed crossing) of 2 segment pairs for NSegments and all frames (index 0) in xyz
      (xyz can contain just one frame).
@@ -30,24 +55,38 @@ def writhe_segments(xyz: torch.Tensor,
         xyz: array of shape (Nframes, N_alpha_carbons, 3),coordinate array giving the positions of ALL the alpha carbons
 
         use_cross: compute the writhe from cross products (more accurate, slightly slower)
-        or dot products (minor floating point errors for very small angles and single precision but faster, errors )
+        or dot products (minor floating point errors for very small angles and single precision but faster and no issue with doubles )
+
+        lengths: array of shape (Nframes, 3) giving the side lengths of the simulation box
+        so that displacements can account for periodic boundary conditions
 
     #note : this function overwrites transient variables to minimize memory usage,
-            this can make the math less interpretable.
+            this can make the math and algorithm less interpretable.
     """
 
     # ensure correct shape for segment for lazy arguments
     assert segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."
+
     segments, xyz = segments.unsqueeze(0) if segments.ndim < 2 else segments, \
         xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
 
-    dx = divnorm((-xyz[:, segments[:, :2], None]
-                  + xyz[:, segments[:, None, 2:]]
-                  ).reshape(-1, len(segments), 4, 3))
+    dx = (-xyz[:, segments[:, :2], None] + xyz[:, segments[:, None, 2:]]).reshape(-1, len(segments), 4, 3)
 
-    signs = (torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
-                         xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
-                         dim=-1) * dx[:, :, 0]).sum(-1).sign()
+    if not periodic:
+        dx = divnorm(dx)
+
+        signs = (torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
+                             xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
+                             dim=-1) * dx[:, :, 0]).sum(-1).sign()
+
+    else:
+
+        dx = divnorm(pbc_correct(dx, lengths))
+
+        signs = (torch.cross(pbc_correct(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]], lengths),
+                             pbc_correct(xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]], lengths),
+                             dim=-1) * dx[:, :, 0]).sum(-1).sign()
+
     if use_cross:
         dx = divnorm(torch.cross(dx[:, :, [0, 1, 3, 2]],
                                  dx[:, :, [1, 3, 2, 0]],

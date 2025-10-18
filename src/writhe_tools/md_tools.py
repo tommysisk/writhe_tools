@@ -1,3 +1,5 @@
+#from jedi.api.helpers import infer
+
 from .utils.misc import to_numpy,optional_import
 md = optional_import("mdtraj", "mdtraj")
 
@@ -7,17 +9,82 @@ import warnings
 import multiprocessing
 from .utils.filing import save_dict, load_dict
 from .utils.indexing import (triu_flat_indices,
-                            combinations,
-                            product,)
-from .utils.sorting import filter_strs, lsdir
+                             combinations,
+                             product, reindex_list, )
+from .utils.sorting import filter_strs, lsdir, num_str
 from .plots import plot_distance_matrix, build_grid_plot
 from numba import njit, prange
 import os
+from typing import Optional, Union, List
+from functools import partial
+
+def mean(x: np.ndarray, weights: np.ndarray = None, ax: int = 0):
+
+    if weights is None:
+        return x.mean(ax)
+    else:
+        shape = (1 if i != ax else x.shape[i] for i in range(len(x.shape)))
+        return (weights.reshape(*shape) * x).sum(ax) / weights.sum()
 
 
+residue_types = dict(
 
 
+    hydrophobic = [
+        "ALA",  # Alanine
+        "VAL",  # Valine
+        "LEU",  #Leucine
+        "ILE",  # Isoleucine
+        "MET",  # Methionine
+        # "PHE",  # Phenylalanine
+        # "TRP",  # Tryptophan
+        "PRO"   # Proline (moderately hydrophobic, often included)
+    ],
 
+    aromatic = [
+        "PHE",  # Phenylalanine
+        "TYR",  # Tyrosine
+        "TRP" , # Tryptophan
+        "HIS",
+    ],
+
+    charged = ["ARG", "LYS",  "ASP", "GLU"],
+
+    polar = ["SER", "THR", "ASN", "GLN", "CYS"],
+
+)
+
+canonical_residues = np.array(['ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLU', 'GLN', 'GLY',
+                      'HIS', 'ILE', 'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER',
+                      'THR', 'TRP', 'TYR', 'VAL'])
+
+
+def get_residues(traj: md.Trajectory, index: Optional[Union[List[int], np.ndarray]] = None):
+    sequence = np.array([str(traj.top.residue(i)) for i in range(traj.n_residues)])
+    if index is not None:
+        return sequence[index.astype(int)] if isinstance(index, np.ndarray)\
+                else reindex_list(sequence, index)
+    else:
+        residue_index = np.array([getattr(traj.top.atom(int(i)).residue, 'index')
+                                  for i in traj.top.select("protein and name CA")]).astype(int)
+    return sequence, residue_index
+
+
+def one_hot_residue_type(sequence: Union[list, np.ndarray],
+                         types: Optional[Union[List[str], None]] = None,
+                         numpy: bool = True):
+
+    """types must be None (all types) for a list of types that can include ...
+                polar, aromatic, charged, hydrophobic
+    """
+    residues = np.array(list(map(partial(num_str, reverse=True), sequence)))
+
+    if types is None:
+        result = [np.isin(residues, i).astype(int) for i in residue_types.values()]
+        return np.stack(result) if numpy else dict(zip(residue_types.keys(), result))
+    else:
+        result = [np.isin(residues, residue_types[i] if i in residue_types.keys() else i).astype(int) for i in types]
+        return np.stack(result) if numpy else dict(zip(types, result))
 
 
 @njit
@@ -34,12 +101,27 @@ def distance_pair(xyz, pair, length=None):
 
 
 @njit
+def displacement_pair(xyz, pair, length=None):
+    displacements = xyz[:,pair[1]] - xyz[:,pair[0]]
+    # if we have periodic boundary conditions
+    if length is not None:
+        displacements -= length * np.round(displacements / length)
+    return displacements
+
+@njit
+def parallel_displacements(xyz, pairs, length=None):
+    displacements = np.zeros((len(pairs), len(xyz), 3))
+    for i in prange(len(pairs)):
+        displacements[i] = displacement_pair(xyz, pairs[i], length)
+    return np.transpose(displacements, (1, 0, 2))
+
+@njit
 def parallel_distances(xyz, pairs, length=None):
     distances = np.zeros((len(pairs),len(xyz)))
     for i in prange(len(pairs)):
 
         distances[i] = distance_pair(xyz, pairs[i], length)
-    return distances
+    return distances.T
 
 def to_distance_matrix(distances: np.ndarray,
                        n: int,
@@ -54,7 +136,7 @@ def to_distance_matrix(distances: np.ndarray,
 
     # intra molecular distances
     if m is None:
-        matrix = np.zeros([N] + [n] * 2)
+        matrix = np.zeros((N, n, n))
         i, j = np.triu_indices(n, d0)
         matrix[:, i, j] = distances
         return (matrix + matrix.transpose(0, 2, 1)).squeeze()
@@ -67,15 +149,28 @@ def to_distance_matrix(distances: np.ndarray,
 
 
 def residue_distances(traj,
-                      index_0: np.ndarray,
+                      index_0: np.ndarray = None,
                       index_1: np.ndarray = None,
                       periodic: bool = True,
-                      parallel: bool = False):
+                      parallel: bool = False,
+                      indices: np.ndarray = None
+                      ):
     # intra distance case
+    if indices is not None:
+        return md.compute_contacts(traj, indices, periodic=periodic)[0], indices if not parallel \
+            else parallel_distances(traj.xyz, indices,
+                                    length=traj.unitcell_lengths if periodic else None)
+
+    assert index_0 is not None, 'If indices are not supplied, must at least supply index_0'
+
+
+
+
     if index_1 is None:
         indices = combinations(index_0)
         return md.compute_contacts(traj, indices, periodic=periodic)[0], indices if not parallel \
-            else parallel_distances(traj.xyz, indices, length=traj.unitcell_lengths if periodic else None)
+            else parallel_distances(traj.xyz, indices,
+                                    length=traj.unitcell_lengths if periodic else None)
 
     # inter distance case
     else:
@@ -99,6 +194,7 @@ class ResidueDistances:
                  chain_id_1: str = None,
                  contact_cutoff:float=0.5,
                  parallel: bool = False,
+                 d0: int = 0,
                  args: "dict or path (str) to saved dict" = None):
 
         # restore the class from dictionary that it saves
@@ -126,7 +222,7 @@ class ResidueDistances:
 
             else:
                 self.chain_id_0, self.chain_id_1 = chain_id_0, chain_id_1
-                self.residues_0, self.residues_1 = get_residues(traj, [index_0, index_1])
+                self.residues_0, self.residues_1 = [get_residues(traj, i) for i in  (index_0, index_1)]
                 self.n, self.m = map(len, (index_0, index_1))
                 self.prefix = "Inter"
                 self.distances = residue_distances(traj, index_0, index_1,
@@ -169,9 +265,14 @@ class ResidueDistances:
                distances: np.ndarray=None,
                contacts: bool = False,
                cut_off: float = None,
+               index: np.ndarray = None
                ):
 
         distances = self.distances if distances is None else distances
+
+        if index is not None:
+            distances = distances[index]
+
         return to_distance_matrix(to_contacts(distances, cut_off or self.contact_cutoff)\
                                   if contacts else distances,
                                   self.n,
@@ -191,6 +292,7 @@ class ResidueDistances:
              cmap: str = "jet",
              line_plot_args: dict = None,
              xticks_rotation: float = 0,
+             weights: np.ndarray = None,
              ax=None):
 
 
@@ -205,7 +307,7 @@ class ResidueDistances:
             unit = " (nm)"
 
         if index is None:
-            matrix = self.matrix(matrix.mean(0))
+            matrix = self.matrix(mean(matrix, weights=weights))
             __stype = "Average "
 
         elif isinstance(index, (int, float)):
@@ -215,8 +317,8 @@ class ResidueDistances:
             dscr = f'Frame {index}' if dscr is None else dscr
 
         else:
-            index = to_numpy(index).astype(int)
-            matrix = self.matrix(matrix[index].mean(0))
+            #index = to_numpy(index).astype(int)
+            matrix = self.matrix(mean(matrix[index], weights=weights[index] if weights is not None else None))
             __stype = "Average "
 
             if dscr == "":
@@ -278,8 +380,8 @@ def load_traj(dir: str,
               keyword: str = None,
               exclude: str = None,
               selection: str = None,
-              traj_ext: str = "dcd",
-              top_ext: str = "pdb",
+              traj_ext: str = ".dcd",
+              top_ext: str = ".pdb",
               stride: int = 1):
     def check(x: list):
         if len(x) == 1:
@@ -433,22 +535,25 @@ def traj_slice(traj, selection):
     return traj.atom_slice(traj.top.select(selection))
 
 
-def get_residues(traj,
-                 indices: "iterable of arrays or array" = None,
-                 atoms: bool = False,
-                 cat: bool = False):
-    indices = np.arange(len(traj.top.select("name CA"))) if indices is None else indices
-    assert isinstance(indices, (np.ndarray, list)), "indices must be np.ndarray or list of np.ndarrays"
 
-    func = (lambda index: traj.top.select(f"resid {int(index)}")) if atoms else (
-        lambda index: str(traj.top.residue(int(index))))
-
-    if isinstance(indices, np.ndarray):
-        return func(indices) if len(indices) == 1 else \
-            np.concatenate(list(map(func, indices))) if (cat and atoms) else \
-                list(map(func, indices))
-    else:
-        return [np.concatenate(list(map(func, i))) if (len(i) != 1 and cat and atoms) else
-                list(map(func, i)) if len(i) != 1 else func(i) for i in indices]
+# def get_residues(traj,
+#                  indices: "iterable of arrays or array" = None,
+#                  atoms: bool = False,
+#                  cat: bool = False):
+#     if indices is None:
+#         indices = np.arange(len(traj.top.select("name CA"))) if indices is None else indices
+#     else:
+#         assert isinstance(indices, (np.ndarray, list)), "indices must be np.ndarray or list of np.ndarrays"
+#
+#     func = (lambda index: traj.top.select(f"resid {int(index)}")) if atoms else (
+#         lambda index: str(traj.top.residue(int(index))))
+#
+#     if isinstance(indices, np.ndarray):
+#         return func(indices) if len(indices) == 1 else \
+#             np.concatenate(list(map(func, indices))) if (cat and atoms) else \
+#                 list(map(func, indices))
+#     else:
+#         return [np.concatenate(list(map(func, i))) if (len(i) != 1 and cat and atoms) else
+#                 list(map(func, i)) if len(i) != 1 else func(i) for i in indices]
 
 

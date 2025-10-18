@@ -4,8 +4,10 @@ import matplotlib.pyplot as plt
 from .utils.filing import save_dict, load_dict
 from .utils.misc import optional_import
 from .plots import get_color_list
+#from scipy.linalg import eig, eigh
 
 deeptime = optional_import('deeptime', 'stats' )
+scipy = optional_import('scipy', 'stats' )
 
 def reindex_msm(dtrajs: np.ndarray,
                 tmats: np.ndarray = None,
@@ -225,7 +227,7 @@ def plot_cktest(predict: np.ndarray, estimate: np.ndarray=None,
     # make sure the predictions errors match up if they're provided
 
     if predict_errors is not None:
-        if predict_errors.shape[1] != len(predict):
+        if predict_errors.shape[0] != len(predict):
             predict_errors = np.concatenate(
                 [np.expand_dims(np.stack([np.eye(predict.shape[1])] * 2), axis=1), predict_errors],
                 axis=1)
@@ -399,18 +401,21 @@ class MarkovModel:
     def load(cls, file):
         return cls(args=load_dict(file))
 
-    def estimate_msm_(self, lagtime):
-        return deeptime.markov.msm.MaximumLikelihoodMSM(reversible=True).fit_fetch(self.dtraj, lagtime=lagtime)
+    def estimate_msm_(self, lagtime: int, reversible: bool = True):
+        return deeptime.markov.msm.MaximumLikelihoodMSM(reversible=reversible
+                                                        ).fit_fetch(self.dtraj, lagtime=lagtime)
 
-    def estimate_msm(self, lag: int,
-                     steps: int = 5):
+    def estimate_msm(self,
+                     lag: int,
+                     steps: int = 5,
+                     reversible: bool=True):
 
         # base msm from which all the other models are estimated
         self.lag = lag
 
         self.msm.update(dict(data={}))
 
-        self.msm["msms"] = list(map(self.estimate_msm_, np.arange(1, steps + 2) * lag))
+        self.msm["msms"] =[self.estimate_msm_(i, reversible) for i in np.arange(1, steps + 2) * lag]
 
         self.msm["data"]["tmats"] = [msm.transition_matrix
                                      for msm in self.msm["msms"]]
@@ -524,7 +529,8 @@ class MarkovModel:
         return s
 
     def cktest(self, model_type,
-               predict_color: str = "red"):
+               predict_color: str = "red",
+               figsize: tuple = (15, 15)):
 
         """
         CAUTION : running this for a model with very large
@@ -540,7 +546,8 @@ class MarkovModel:
                     lag=self.lag,
                     dt=self.dt,
                     predict_color=predict_color,
-                    title=caps(model_type))
+                    title=caps(model_type),
+                    figsize=figsize)
         return
 
     def stationary_distribution(self,
@@ -562,3 +569,119 @@ class MarkovModel:
                        font_scale=font_scale,
                        ax=ax,
                        state_label_stride=state_label_stride)
+
+
+# rate matrix analysis (Q)
+
+def is_sym(x):
+    return np.isclose(x, x.T, atol=1e-4).all()
+
+def stationary_distribution(P, rate_matrix: bool = True):
+
+    s, L = [i.real for i in scipy.linalg.eig(P.T)]
+
+    idx = np.abs(s).argsort()
+
+    if not rate_matrix:
+        idx = idx[::-1]
+
+    return L.T[idx[0]] / L.T[idx[0]].sum()
+
+
+def reversible_matrix_decomposition(P, rate_matrix: bool=True, pi=None):
+
+    pi = stationary_distribution(P, rate_matrix) if pi is None else pi
+
+    s, R = scipy.linalg.eigh(np.diag(pi) @ P, np.diag(pi))
+
+    idx = np.abs(s).argsort()
+
+    if not rate_matrix:
+        idx = idx[::-1]
+
+    return s[idx], R[:, idx], pi
+
+def irreversible_matrix_decomposition(P, rate_matrix: bool=True):
+
+    s, R = scipy.linalg.eig(P)
+
+
+    idx = np.abs(s).argsort()
+
+    if not rate_matrix:
+        idx = idx[::-1]
+
+    s, R = s[idx], R[:, idx]
+
+    L = np.linalg.inv(R)
+
+    return L, s, R
+
+    # L[:, 0] /= L[:, 0].sum() # proportional to pi initially, now normed
+
+    # R[:, 0] /= R[:, 0].sum()
+
+def group_inverse(Q):
+    """
+    Compute the group inverse Q^# of a generator matrix Q.
+
+    Q^# = (Q + Π)^(-1) - Π
+    where Π = 1·πᵗ and π is the stationary distribution of Q.
+    """
+    n = Q.shape[0]
+    pi = stationary_distribution(Q)
+    Pi = np.outer(np.ones(n), pi)
+    return np.linalg.inv(Q + Pi) - Pi
+
+
+
+def spectral_group_inverse(Q):
+    """
+    Compute the group inverse Q^# of a generator matrix Q.
+
+    Q^# = (Q + Π)^(-1) - Π
+    where Π = 1·πᵗ and π is the stationary distribution of Q.
+    """
+    pi = stationary_distribution(Q)
+
+    if is_sym(np.diag(pi) @ Q):
+        s, R, pi = reversible_matrix_decomposition(Q, pi= pi)
+        s_inv = 1 / s # should get nan in index 0 for stationary eigen value
+        s_inv[0] = 0
+        return R @ np.diag(s_inv) @ R.T @ pi
+
+    else:
+        L, s, R = irreversible_matrix_decomposition(Q)
+        s_inv = 1 / s # should get nan in index 0 for stationary eigen value
+        s_inv[0] = 0
+        return (R @ np.diag(s_inv) @ L).real
+
+
+def mfpt_from_group_inverse(Q):
+    """
+    Compute the MFPT matrix using the group inverse of Q.
+
+    M_ij = (Z_jj - Z_ij) / π_j   for i ≠ j
+    M_ii = 0
+
+    Equivalent to M = (outer(ones, diag(G)) − G)Π^−1
+
+    """
+    Z = -group_inverse(Q)
+
+    pi = stationary_distribution(Q)
+
+    ones = np.ones(len(pi)).reshape(-1, 1)
+
+    return (np.outer(ones, np.diag(Z)) - Z) @ np.diag(1 / pi)
+
+    # n = Q.shape[0]
+    # M = np.zeros((n, n))
+    # for i in range(n):
+    #     for j in range(n):
+    #         if i != j:
+    #             M[i, j] = (Z[j, j] - Z[i, j]) / pi[j]
+    # return M
+
+
+
