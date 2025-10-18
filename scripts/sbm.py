@@ -2275,6 +2275,8 @@ class PaiNNBase(torch.nn.Module):
         return self.layers(batch)
 
 
+
+
 class Message(torch.nn.Module):
     def __init__(
             self,
@@ -2282,7 +2284,6 @@ class Message(torch.nn.Module):
             length_scale=10,
             dist_encoding="positional_encoding",
             use_edge_features=True,
-            n_atoms=20,
     ):
         super().__init__()
         self.n_features = n_features
@@ -2300,7 +2301,6 @@ class Message(torch.nn.Module):
         phi_in_features = 2 * n_features if use_edge_features else n_features
         self.phi = MLP(phi_in_features, n_features, 4 * n_features)
         self.w = MLP(n_features, n_features, 4 * n_features)
-        self.u = MLP(n_features, n_features, 4 * n_features)
 
     def forward(self, batch):
         src_node = batch.edge_index[0]
@@ -2314,23 +2314,18 @@ class Message(torch.nn.Module):
             )
 
         positional_encoding = self.positional_encoder(batch.edge_dist)
-        wr = torch.stack([torch.sin(batch.writhe / 10 * i * torch.pi)
-                          for i in torch.arange(self.n_features)],
-                            dim=-1)
 
         gates, scale_edge_dir, ds, de = torch.split(
-            self.phi(in_features) * self.w(positional_encoding) * self.u(wr),
+            self.phi(in_features) * self.w(positional_encoding),
             self.n_features,
             dim=-1,
         )
         gated_features = multiply_first_dim(
             gates, batch.equivariant_node_features[src_node]
         )
-
         scaled_edge_dir = multiply_first_dim(
             scale_edge_dir, batch.edge_dir.unsqueeze(1).repeat(1, self.n_features, 1)
         )
-
         dv = scaled_edge_dir + gated_features
         dv = scatter(dv, dst_node, dim=0)
         ds = scatter(ds, dst_node, dim=0)
@@ -2340,6 +2335,12 @@ class Message(torch.nn.Module):
         batch.invariant_edge_features += de
 
         return batch
+
+
+
+
+
+
 
 
 class SE3WritheMessage(nn.Module):
@@ -2617,6 +2618,99 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+import mdtraj as md
+
+def get_digit(string):
+    out = "".join(filter(str.isdigit, string))
+    if len(out) == 0:
+        return None
+    else:
+        return out
+
+
+def rm_path(string: str):
+    return string.split("/")[-1]
+
+
+def rm_extension(string: str):
+    return ".".join(string.split(".")[:-1])
+
+
+def save_mdtraj(xyz: np.ndarray, file: str, top):
+    traj = md.Trajectory(xyz.reshape(-1, top.n_atoms, 3), topology=top)
+    traj.save_dcd(get_indexed_file(f"{file}.dcd"))
+    return
+
+
+def get_indexed_file(file):
+    """recursive function to create the next iteration in a series of indexed directories
+    to save training results generated from repeated trials. Guarantees correctly indexed
+    directories and allows for lazy initialization (i.e finds the next index automatically
+    assuming the "root" or "base" directory name remains the same)"""
+
+    if not os.path.isfile(file):
+        return file
+    else:
+        path_list = file.split("/")
+        local_file = path_list.pop()
+        global_dir = "/".join(path_list)+"/"
+        no_ext = rm_extension(local_file)
+        digit = get_digit(no_ext)
+
+        if digit is not None:
+            trial_file = global_dir + local_file.replace(digit, str(int(digit)+1))
+        else:
+            trial_file = global_dir + no_ext + "1." + local_file.split(".")[-1]
+
+        trial_file = get_indexed_file(trial_file)
+
+        return trial_file
+
+
+
+
+class SamplingCallback(pl.Callback):
+    def __init__(self,
+                 log_path,
+                 template_pdb,
+                 scale=0.34199494,
+                 ode_steps=100,
+                 interval=25,
+                 max_batches=200):
+        super().__init__()
+        self.log_path = log_path
+        self.top = md.load(template_pdb).top
+        self.scale = scale
+        self.ode_steps = ode_steps
+        self.interval = interval
+        self.max_batches = max_batches
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        epoch = trainer.current_epoch
+        if (epoch + 1) % self.interval != 0:
+            return
+
+        print(f"\n[Sampling] Epoch {epoch+1}: generating samples...")
+
+        loader = trainer.train_dataloader
+        samples = []
+        for i, batch in enumerate(loader):
+            with torch.no_grad():
+                out = pl_module.sample_like(batch, ode_steps=self.ode_steps)
+            samples.append(
+                out.x.cpu().numpy().reshape(-1, self.top.n_atoms, 3)
+            )
+            if i > self.max_batches:
+                break
+
+        all_samples = np.concatenate(samples)
+        save_mdtraj(
+            xyz=all_samples * self.scale,
+            file=f"{self.log_path}/samples_epoch{epoch+1}",
+            top=self.top,
+        )
+
+
 
 def main(data_path: str,
          log_path: str,
@@ -2692,10 +2786,18 @@ def main(data_path: str,
                                           train_time_interval=timedelta(minutes=checkpoint_train_time_interval),
                                           )
 
+    sample_callback = SamplingCallback(log_path=log_path,
+                                        template_pdb=args.template_pdb,
+                                        scale=args.scale,
+                                        ode_steps=args.ode_steps,
+                                        interval=25,
+    )
+
+
     trainer = pl.Trainer(
         max_epochs=max_epochs,
         log_every_n_steps=log_every_n_steps,
-        callbacks=[checkpoint_callback],
+        callbacks=[checkpoint_callback, sample_callback],
         enable_progress_bar=progress_bar,
         gradient_clip_val=0.5,
         accelerator=accelerator,
@@ -2716,7 +2818,8 @@ def main(data_path: str,
                           n_node_types=n_node_types,
                           writhe_layer=writhe_layer,
                           cross_product=cross_product,
-                          n_atoms=n_atoms
+                          n_atoms=n_atoms,
+
                           )
 
     trainer.fit(model,
@@ -2768,6 +2871,11 @@ if __name__ == '__main__':
                               "options: ddp (Distributed Data Parallel Data), dp (Data Parallel), None (single gpu")
                         )
 
+    parser.add_argument("--template_pdb",
+                        "-pdb",
+                        type=str,
+                        default="/dartfs-hpc/rc/lab/R/RobustelliP/Tommy/asyn_gen/ddpm/my_ito/asyn_ca.pdb")
+
     parser.add_argument("--n_node_types", type=int, default=20)
 
     parser.add_argument("--n_bond_types", type=int, default=210)
@@ -2797,6 +2905,9 @@ if __name__ == '__main__':
 
     parser.add_argument("--stride", type=int, default=1,
                         )
+
+    parser.add_argument("--scale", type=float, default=0.34199494)
+    parser.add_argument("--ode_steps", type=int, default=50)
 
     args = parser.parse_args()
 

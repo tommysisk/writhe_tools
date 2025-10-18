@@ -20,17 +20,17 @@ source /dartfs-hpc/rc/home/4/f005dy4/miniconda3/etc/profile.d/conda.sh
 conda activate base
 
 data_path="/dartfs-hpc/rc/lab/R/RobustelliP/Tommy/asyn_gen/graphs.pt"
-log_path="/dartfs-hpc/rc/lab/R/RobustelliP/Tommy/asyn_gen/ddpm/my_ito/writhe_vector_scalar_standard_test"
+log_path="/dartfs-hpc/rc/lab/R/RobustelliP/Tommy/asyn_gen/ddpm/my_ito/painn_sample_intermediate"
 cross_product="False"
-writhe_layer="True"
+writhe_layer="False"
 n_score_layers="8"
 learning_rate="1e-4"
 
 ckpt_file=$(fxn_lsnew "$(full_search "$log_path" batch)" | grep epoch= | head -n 1)
 
-echo "$ckpt_file" # only if already exists in lag_path
+#echo "$ckpt_file" # only if already exists in lag_path
 
-./ito_scale_5.py \
+./sbm.py \
 --data_path "$data_path" \
 --log_path "$log_path" \
 --cross_product "$cross_product" \
