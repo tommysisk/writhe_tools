@@ -210,19 +210,19 @@ def plot_cktest(predict: np.ndarray, estimate: np.ndarray=None,
                 predict_errors=None, estimate_errors=None,
                 fill_estimate=True, title: str = None,
                 figsize: tuple = (15, 15),
-                font_scale: float = 1):
+                font_scale: float = 1, prepend_id: bool =True):
     """predict+errors should be of shape [2,predict/estimate.shape] where the 0th dim is upper and lower
     confidence intervals"""
 
-    check_id = lambda x: np.all(x == np.eye(len(x)))
+    if prepend_id:check_id = lambda x: np.all(x == np.eye(len(x)))
 
     # add an identity to estimate and predictions if the first matrix is not identity already
     # this is for plotting purposes
-
-    if not check_id(predict[0]):
-        print("changing pred")
-        predict = np.concatenate([np.expand_dims(np.eye(predict.shape[1], predict.shape[1]), axis=0),
-                                  predict])
+    if prepend_id:
+        if not check_id(predict[0]):
+            print("changing pred")
+            predict = np.concatenate([np.expand_dims(np.eye(predict.shape[1], predict.shape[1]), axis=0),
+                                      predict])
 
     # make sure the predictions errors match up if they're provided
 

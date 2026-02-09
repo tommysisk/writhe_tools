@@ -173,6 +173,51 @@ def truncate_colormap(cmap: str, minval=0.0, maxval=1.0, n=100):
     return new_cmap
 
 
+from matplotlib import colormaps as _cmaps
+from matplotlib.colors import LinearSegmentedColormap
+
+def get_cmap(cmap_name: str, hi: float = 1.0, lo: float = 0.0, N: int = 256):
+    """
+    Return a colormap you can pass directly to matplotlib plotting functions,
+    truncated between lo and hi for aesthetics.
+
+    Parameters
+    ----------
+    cmap_name : str
+        Name of the base colormap (e.g., 'viridis', 'plasma').
+    hi : float
+        Upper bound in [0, 1] along the colormap. Should be > lo.
+        Example: hi=0.9 keeps only up to 90% of the original cmap.
+    lo : float
+        Lower bound in [0, 1] along the colormap. Should be < hi.
+        Example: lo=0.1 discards the bottom 10% of the original cmap.
+    N : int
+        Number of discrete colors in the resulting colormap.
+
+    Returns
+    -------
+    cmap : matplotlib.colors.Colormap
+        A callable colormap object usable as `cmap=...` in pyplot.
+    """
+    # New, non-deprecated way to grab the base colormap
+    base = _cmaps.get_cmap(cmap_name)
+
+    lo = max(0.0, min(1.0, lo))
+    hi = max(0.0, min(1.0, hi))
+
+    if hi <= lo:
+        raise ValueError(
+            f"Invalid bounds: lo={lo}, hi={hi} with hi <= lo. "
+            "Require 0 <= lo < hi <= 1."
+        )
+
+    colors = base(np.linspace(lo, hi, N))
+    return LinearSegmentedColormap.from_list(
+        f"{cmap_name}_trunc_{lo:.2f}_{hi:.2f}", colors
+    )
+
+
+
 from mpl_toolkits.axes_grid1 import make_axes_locatable, axes_size
 
 def annotated_matrix_plot(matrix: np.ndarray,
@@ -205,7 +250,8 @@ def annotated_matrix_plot(matrix: np.ndarray,
                           grid_alpha: float = 0.3,
                           grid_color: str = "black",
                           grid_linewidth: float = 0.8,
-                          xticks_top: bool = False):   # <-- new argument
+                          xticks_top: bool = False,
+                          hide_cbar_ticks: bool = False):   # <-- new argument
     """
     matrix: data to display (rectangular or square).
     error_matrix: optional error values of same shape.
@@ -288,6 +334,16 @@ def annotated_matrix_plot(matrix: np.ndarray,
     cb.set_label(cbar_label, size=40 * font_scale)
     cb.ax.tick_params(labelsize=30 * font_scale)
 
+    if hide_cbar_ticks:
+        cb.ax.tick_params(
+            left=False, right=False,
+            labelleft=False, labelright=False,
+            top=False, bottom=False,
+            labeltop=False, labelbottom=False
+        )
+
+
+
     ax.set_title(title, size=45 * font_scale)
     return ax
 
@@ -323,8 +379,8 @@ def plot_distance_matrix(matrix: np.ndarray,
                          grid: bool = False,
                          grid_spacing: int = 1,
                          grid_alpha: float = 0.3,
-                         grid_color: str = "black",
-                         grid_linewidth: float = 0.8,
+                         grid_color: str = "gray",
+                         grid_linewidth: float = 0.3,
                          file: str = None,
                          dpi: float = 1000):
 
@@ -332,7 +388,7 @@ def plot_distance_matrix(matrix: np.ndarray,
     n, m = matrix.shape
     args = locals()
 
-    cmap = getattr(plt.cm, cmap)
+    #cmap = getattr(plt.cm, cmap)
 
     if ax is None:
         fig, ax = plt.subplots(1, figsize=figsize)
@@ -453,6 +509,7 @@ def lineplot1D(y,
                legend: bool = False,
                ax=None,
                top_xticks: "list or np.ndarray" = None,
+               grid: bool = True,
                ):
 
     args = locals()
@@ -532,6 +589,9 @@ def lineplot1D(y,
         ax_top.set_xticks(top_ticks, labels=top_labels, rotation=xticks_rotation)
         ax_top.tick_params(axis='x', size=3 * font_scale, labelsize=12 * font_scale)
 
+    if grid:
+        ax.grid()
+
     # for dim, key in zip([m, n], ["xticks", "yticks"]):
     #     val = args[key]
     #     if val is not None:
@@ -557,8 +617,9 @@ def lineplot1D(y,
 
 def build_grid_plot(matrix_args: dict,
                     line_args: dict,
-                    size: int = 1.5):
-    fig = plt.figure(figsize=(3 * size, 3.1 * size),
+                    size: int = 1.5,
+                    figsize=(3, 2.7)):
+    fig = plt.figure(figsize=(figsize[0] * size, figsize[1] * size),
                      constrained_layout=True)
     grid = matplotlib.gridspec.GridSpec(nrows=6, ncols=3, figure=fig, hspace=.001, wspace=0.2,
                                         top=.92)
@@ -566,10 +627,11 @@ def build_grid_plot(matrix_args: dict,
     ax0 = fig.add_subplot(grid[:-1, :])
     ax1 = fig.add_subplot(grid[-1, :], sharex=ax0)
     matrix_args["ax"] = ax0
+    line_args['label_stride'] = matrix_args['label_stride']
     line_args["ax"] = ax1
-    line_args["font_scale"] = 1
+    line_args["font_scale"] = .95
     line_args["hide_title"] = True
-    matrix_args["font_scale"] = 1.2
+    matrix_args["font_scale"] = 1.4
     matrix_args["hide_x"] = True
     matrix_args["xlabel"] = None
     matrix_args["xticks"] = None
@@ -601,6 +663,7 @@ def fes2d(x: np.ndarray,
           contour_lines: bool = False,
           alpha_lines: float = 0.6,
           scatter: bool = False,
+          c : np.ndarray = None,
           scatter_alpha: float = .2,
           scatter_cmap: str = "bone",
           scatter_size: float = 0.05,
@@ -616,11 +679,14 @@ def fes2d(x: np.ndarray,
           tick_decimals: int = 2,
           extend_border: float = 1e-5,
           hide_ax: bool = False,
+          figsize=(5, 3),
           ax=None,
           aspect="auto",
           mask_thresh: float = 0,
           ):
     x, y = (np.squeeze(i) if i is not None else None for i in (x, y))
+
+    if c is not None: scatter = True
 
     if y is None:
         assert (x.ndim == 2) and (x.shape[-1] == 2), \
@@ -650,7 +716,7 @@ def fes2d(x: np.ndarray,
     F += -F.min()
 
     if ax is None:
-        fig, ax = plt.subplots(1, figsize=(5, 3))
+        fig, ax = plt.subplots(1, figsize=figsize)
 
     # ax.margins(extend_border, tight=False)
 
@@ -687,11 +753,15 @@ def fes2d(x: np.ndarray,
         ax.set_xlim(extent[0][0], extent[0][1])
         ax.set_ylim(extent[1][0], extent[1][1])
 
+
+
     ax.set_xticks(np.linspace(extent[0][0], extent[0][1], nxticks),
-                  np.linspace(extent[0][0], extent[0][1], nxticks).round(tick_decimals))
+                  np.linspace(extent[0][0], extent[0][1], nxticks).round(tick_decimals) if tick_decimals != 0\
+                  else np.linspace(extent[0][0], extent[0][1], nxticks).astype(int))
 
     ax.set_yticks(np.linspace(extent[1][0], extent[1][1], nyticks),
-                  np.linspace(extent[1][0], extent[1][1], nyticks).round(tick_decimals))
+                  np.linspace(extent[1][0], extent[1][1], nyticks).round(tick_decimals) if tick_decimals != 0 \
+                      else np.linspace(extent[1][0], extent[1][1], nyticks).astype(int))
 
     if cbar:
         if contour_lines or n_contours < 8:
@@ -712,7 +782,7 @@ def fes2d(x: np.ndarray,
     # ax.set_aspect(aspect=aspect, share=True)
 
     if scatter:
-        c = F.flatten()[get_flat_bin_indices_2d(x, y, bins=bins)]
+        c = F.flatten()[get_flat_bin_indices_2d(x, y, bins=bins)] if c is None else c
         # ax1 = ax.twinx().twiny()
         # ax1.set_xticks([])
         # ax1.set_yticks([])
@@ -978,7 +1048,7 @@ def proj2d(x: np.ndarray,
         cbar.ax.tick_params(labelsize=9 * font_scale)
 
     else:
-        s = ax.scatter(x, y, c=c, s=.5, cmap=cmap,
+        s = ax.scatter(x, y, c=c, s=dot_size, cmap=cmap,
                        alpha=alpha, vmin=vmin, vmax=vmax)
 
     ax.set_aspect(aspect)

@@ -14,7 +14,7 @@ import math
 from joblib import Parallel, delayed
 from typing import Optional, Union, List
 
-from .utils.indexing import split_list, get_segments
+from .utils.indexing import split_list, get_segments, incidence_writhe_edges
 from .utils.torch_utils import estimate_segment_batch_size, catch_cuda_oom
 from .writhe_nn import writhe_segments
 from .writhe_ray import writhe_segments_ray
@@ -145,11 +145,20 @@ def calc_writhe_parallel_cuda(xyz: torch.Tensor,
         return np.concatenate(result[0], axis=-1)
 
 
-def to_writhe_matrix(writhe_features, n_points, length):
+def to_writhe_matrix(writhe_features: np.ndarray, length: int = 1, n_points: int = None):
     # assert not all(i is None for i in (n_points, length)), "Must provide either n_points (atoms) or segment length"
     # if n_points is not None:
+
     writhe_features = (np.expand_dims(writhe_features, 0) if writhe_features.ndim < 2
                        else writhe_features)
+    if n_points is None:
+
+        d = writhe_features.shape[1]
+
+        b, c = -1 * (2 * length + 3), -1 * (2 * d - 5 * length - length**2)
+
+        n_points = (-b + math.isqrt(b**2 - 4 * c)) // 2
+
     n = len(writhe_features)
     writhe_matrix = np.zeros([n] + [n_points - length] * 2)
 
@@ -160,6 +169,49 @@ def to_writhe_matrix(writhe_features, n_points, length):
     writhe_matrix += writhe_matrix.transpose(0, 2, 1)
 
     return writhe_matrix.squeeze()
+
+def to_laplacian(writhe_features: Union[np.ndarray, torch.Tensor],
+                 n_points: int = None,
+                 square: bool = True):
+
+    writhe_features = torch.from_numpy(writhe_features) if isinstance(writhe_features, np.ndarray)\
+        else writhe_features
+
+    writhe_features = writhe_features.unsqueeze(0) if writhe_features.ndim < 2 else writhe_features
+
+    if n_points is None:
+
+        d = writhe_features.shape[1]
+
+        b, c = -5, -1 * (2 * d - 6)
+
+        n_points = (-b + math.isqrt(b**2 - 4 * c)) // 2
+
+    indices = torch.unique(incidence_writhe_edges(n_points),
+                           dim=1,
+                           return_inverse=True
+                           )[-1]
+
+    dim = int((n_points**2 - n_points) / 2) - 2
+    n_samples = len(writhe_features)
+    laplacian = torch.zeros((n_samples, dim)).scatter_add_(1,
+                                                            indices.expand(len(writhe_features), -1),
+                                                            writhe_features.repeat_interleave(4, 1)
+                                                            )
+
+    laplacian = torch.nn.functional.pad(laplacian, (1, 1), 'constant', 0.0).numpy()
+    # get square matrix
+    if square:
+        i, j = np.triu_indices(n_points, 1)
+
+        (full_laplacian := np.zeros((n_samples, n_points, n_points)))[:, i, j] = laplacian
+
+        full_laplacian += full_laplacian.transpose(0, 2, 1)
+
+        return full_laplacian
+
+    else:
+        return laplacian
 
 
 def normalize_writhe(wr: np.ndarray, ax: int = None):
@@ -415,7 +467,8 @@ class Writhe:
     def matrix(self,
                n_points: Optional[int] = None,
                length: Optional[int] = None,
-               writhe_features: Optional[np.ndarray] = None) -> np.ndarray:
+               writhe_features: Optional[np.ndarray] = None,
+               laplacian: Optional[bool] = False) -> np.ndarray:
         """
         Convenience function for reindexing and sorting non-redundant
         writhe calculation into a symmetric matrix (redundant) for visualization.
@@ -434,7 +487,44 @@ class Writhe:
         n_points = n_points if n_points is not None else self.n_points
         writhe_features = writhe_features if writhe_features is not None else self.writhe_features
         length = length if length is not None else self.length
-        return to_writhe_matrix(writhe_features, n_points, length)
+        if laplacian:
+            assert length == 1, 'Laplacian can only be computed for writhe length 1'
+
+        return to_laplacian(writhe_features,
+                            n_points=n_points,
+                            square=True) if laplacian\
+                else to_writhe_matrix(writhe_features,
+                                      n_points=n_points,
+                                      length=length)
+
+    def laplacian(self,
+                  n_points: Optional[int] = None,
+                  writhe_features: Optional[np.ndarray] = None,
+                  square: Optional[bool] = True) -> np.ndarray:
+        """
+        Convenience function for reindexing and sorting non-redundant
+        writhe calculation into a symmetric matrix (redundant) for visualization.
+
+        Args:
+            n_points (Optional[int], optional): Number of points in each topology to estimate segments. Defaults to None.
+            length (Optional[int], optional): Length of each segment for writhe calculation. Defaults to None.
+            writhe_features (Optional[np.ndarray], optional): The writhe feature array to use. Defaults to None.
+
+        Returns:
+            np.ndarray: A symmetric matrix representing the writhe features.
+        """
+
+        self.check_data()
+
+        assert self.length == 1, ('Must compute the writhe using a segment length of 1 to compute the'
+                                  'writhe graph laplacian')
+
+
+        n_points = n_points if n_points is not None else self.n_points
+        writhe_features = writhe_features if writhe_features is not None else self.writhe_features
+        #length = length if length is not None else self.length
+        return to_laplacian(writhe_features, n_points, square)
+
 
     def plot_writhe_matrix(self,
                            index: Optional[Union[int, List[int], str, np.ndarray]] = None,
@@ -453,7 +543,8 @@ class Writhe:
                            cbar_label: Optional[str]= None,
                            vmax: Optional[float] = None,
                            #rotation: Optional[float] = 90,
-                           weights: Optional[np.ndarray] = None) -> None:
+                           weights: Optional[np.ndarray] = None,
+                           laplacian: Optional[bool] = False) -> None:
         """
         Plots the writhe matrix for visualizing writhe values in topological frames.
 
@@ -529,7 +620,9 @@ class Writhe:
         if ax is None:
             fig, ax = plt.subplots(1)
 
-        s = ax.imshow(self.matrix(writhe_features=mat).squeeze(), cmap=cmap, norm=norm)
+        s = ax.imshow(self.matrix(writhe_features=mat, laplacian=laplacian).squeeze(),
+                      cmap=cmap,
+                      norm=norm)
 
         cbar = plt.colorbar(s, ax=ax, fraction=0.046, pad=0.04)
         cbar.set_label(cbar_label, fontsize=10 * font_scale, labelpad=2 + np.exp(font_scale))
@@ -549,25 +642,23 @@ class Writhe:
             if args[key] is not None:
                 assert isinstance(args[key], (np.ndarray, list)), \
                     "ticks arguments must be list or np.ndarray"
-
                 labels = to_numpy(args[key]).squeeze()
-
                 assert self.n_points == len(labels), \
                     (f"{key} don't match the number of points used to compute writhe"
                      "The number of points (n_points) used to compute writhe should be equal to the number of tick labels."
                      "This method will correctly handle tick labels to account for the length used to compute writhe")
-
             else:
                 labels = np.arange(0, self.n_points)
-
-
-            labels = labels[:-self.length][np.linspace(0,
-                                                       self.n_points - self.length - 1,
-                                                       (self.n_points - self.length - 1) // label_stride).astype(int)]
-
-            ticks = np.linspace(0,
-                                self.n_points - self.length - 1,
-                                len(labels))
+            if laplacian:
+                ticks = (np.arange(len(labels)) + 0.5)[::label_stride]
+                labels = labels[::label_stride]
+            else:
+                labels = labels[:-self.length][np.linspace(0,
+                                                           self.n_points - self.length - 1,
+                                                           (self.n_points - self.length - 1) // label_stride).astype(int)]
+                ticks = np.linspace(0,
+                                    self.n_points - self.length - 1,
+                                    len(labels))
 
 
             _ = getattr(ax, f"set_{key}")(ticks=ticks,

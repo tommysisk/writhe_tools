@@ -66,13 +66,15 @@ def pmf1d(x: np.ndarray,
           bins: int,
           weights: np.ndarray = None,
           norm: bool = True,
-          range: tuple = None):
+          range: tuple = None,
+          center_bins: bool = True):
 
     count, edge = np.histogram(x, bins=bins, weights=weights, range=range)
     p = count / count.sum() if norm else count
     idx = np.digitize(x, edge[1:-1])
     pi = p.flatten()[idx]
-    return p, pi, idx, edge[:-1] + np.diff(edge) / 2
+    edges = edge[:-1] + np.diff(edge) / 2 if center_bins else edge
+    return p, pi, idx, edges
 
 
 def pmfdd(arrays: "a list of arrays or N,d numpy array",
@@ -80,7 +82,8 @@ def pmfdd(arrays: "a list of arrays or N,d numpy array",
           weights: np.ndarray = None,
           norm: bool = True,
           range: tuple = None,
-          statistic: str = None):
+          statistic: str = None,
+          center_bins: bool = True):
     """each array in arrays should be the same length"""
 
     if statistic is None:
@@ -111,25 +114,28 @@ def pmfdd(arrays: "a list of arrays or N,d numpy array",
 
     p = count / count.sum() if norm else count
     pi = p.flatten()[idx]
-    return p, pi, idx, (edge[:-1] + np.diff(edge) / 2 for edge in edges)
+    edges = (edge[:-1] + np.diff(edge) / 2 for edge in edges) if center_bins else (edge for edge in edges)
+    return p, pi, idx, edges
 
 
 def pmf(x: "list of arrays or array",
         bins: int,
         weights: np.ndarray = None,
         norm: bool = True,
-        range: tuple = None):
+        range: tuple = None,
+        statistic: str = None,
+        center_bins: bool = True):
     """
     returns : p, pi, idx, bin_centers
 
     """
     if isinstance(x, np.ndarray):
         x = x.squeeze()
-        return pmfdd(x, bins, weights, norm, range) if x.ndim > 1\
-                    else pmf1d(x, bins, weights, norm, range)
+        return pmfdd(x, bins, weights, norm, range, statistic=statistic, center_bins=center_bins) if x.ndim > 1\
+                    else pmf1d(x, bins, weights, norm, range, center_bins=center_bins)
     if isinstance(x, list):
-        return pmf1d(x[0], bins, weights, norm, range) if len(x) == 1 \
-                    else pmfdd(x, bins, weights, norm, range)
+        return pmf1d(x[0], bins, weights, norm, range, center_bins=center_bins) if len(x) == 1 \
+                    else pmfdd(x, bins, weights, norm, range, statistic=statistic, center_bins=center_bins)
 
 
 def mean(x: np.ndarray,
@@ -187,7 +193,8 @@ def standardize(x: np.ndarray,
         return center(x, weights) if shift else x
 
 
-
+def min_max_scale(x : np.ndarray, axis: int = None):
+    return (x - x.min(axis=axis, keepdims=True)) / (x.max(axis=axis, keepdims=True) - x.min(axis=axis, keepdims=True))
 
 
 def cov(x: np.ndarray,
@@ -354,13 +361,18 @@ def pca(x: np.ndarray,
 
     norm = np.sqrt(x.shape[0]) if scale is False and weights is None else 1
 
-    s, vt = svd(x / norm, full_matrices=False)[1:] if not dask else\
-            dask_svd(x / norm, k=n_comp, compressed=True)[1:]
+    if weights is not None:
+        w = weights.astype(x.dtype, copy=True)
+        w = (w / w.sum())[:, None] ** (1 / 2)
+    else: w = 1.0
+
+    s, vt = svd(x * w / norm, full_matrices=False)[1:] if not dask else\
+            dask_svd(x * w / norm, k=n_comp, compressed=True)[1:]
 
     v = vt.T[:, :n_comp]
 
     projection = x @ v
-    projection = projection / s[:n_comp] if scale_projection else projection
+    projection = (projection * w) / s[:n_comp] if scale_projection else projection
     return projection, s, v
 
 
@@ -391,6 +403,115 @@ def acf(x):
     # Compute Inverse FFT of the power spectrum
     # Normalize by variance (pearson correlation)
     return np.fft.ifft(np.abs(np.fft.fft(x, n=2*N))**2).real[:N] / (N * np.var(x))
+
+def cross_correlation(x: np.ndarray, y: np.ndarray):
+    """
+    Uses the FFT to compute cross correlation between 1D time series
+
+    x(t) * y(t+tau)
+
+    returns: lags, correlation (automatically computes all negative to positive lags in that order)
+    """
+    x = np.asarray(x, float)
+    y = np.asarray(y, float)
+    N = len(x)
+
+    # Demean
+    x -= x.mean()
+    y -= y.mean()
+
+    # Proper zero-padding to avoid circular wraparound
+    n = 2 * N - 1
+
+    fx = np.fft.rfft(x, n=n)
+    fy = np.fft.rfft(y, n=n)
+    c = np.fft.irfft(fx * np.conj(fy), n=n)
+
+    # shift so that lag=0 is centered
+    c = np.fft.fftshift(c)
+
+    # unbiased normalization
+    overlap = np.arange(1, N + 1)
+    norm = np.concatenate((overlap, overlap[-2::-1]))
+    c /= norm
+
+    # divide by variance *overlap* normalization
+    denom = x.std(ddof=0) * y.std(ddof=0)
+    c /= denom
+
+    # enforce zero outside valid range (suppress tiny wraparound)
+    c[:N//10] = np.nan_to_num(c[:N//10])
+    c[-N//10:] = np.nan_to_num(c[-N//10:])
+
+    lags = np.arange(-N+1, N)
+    return lags, c
+
+def plot_cross_correlation(lags, corr, clip=None, normalize=True, ax=None):
+    """
+    Plot cross-correlation centered at lag=0.
+    Automatically normalizes by the max(|corr|) within the displayed (clip) range.
+
+    Parameters
+    ----------
+    lags : np.ndarray
+        Lag values (output from correlation_integral_fft).
+    corr : np.ndarray
+        Pearson correlation coefficients.
+    clip : int, optional
+        Number of lag samples to display on either side of zero.
+        Also determines the normalization range if normalize=True.
+    normalize : bool, default=True
+        Normalize correlation by max(|corr|) within the displayed range.
+    ax : matplotlib.axes.Axes, optional
+        Axis to plot on. Creates a new one if None.
+
+    Returns
+    -------
+    ax : matplotlib.axes.Axes
+        The Matplotlib axis containing the plot.
+    """
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 4))
+
+    # Determine symmetric clipping window around lag=0
+    mid = len(lags) // 2
+    if clip is not None:
+        start = max(0, mid - clip)
+        end   = min(len(lags), mid + clip)
+        lags_window = lags[start:end]
+        corr_window = corr[start:end]
+    else:
+        lags_window = lags
+        corr_window = corr
+
+    # Normalization: use only displayed window
+    if normalize:
+        ref_max = np.nanmax(np.abs(corr_window))
+        if ref_max > 0:
+            corr_window = corr_window / ref_max
+        else:
+            print("⚠️  Skipping normalization: reference max = 0")
+
+    # --- Plot ---
+    ax.plot(lags_window, corr_window, lw=1.5)
+    ax.axvline(0, color="k", linestyle="--", lw=1)
+    ax.set_xlabel("Lag")
+    ylabel = "Normalized correlation" if normalize else "Pearson correlation"
+    ax.set_ylabel(ylabel)
+    ax.set_title("Cross-correlation vs Lag")
+    ax.grid(True, alpha=0.3)
+
+    # Symmetric tick labeling
+    maxlag = np.max(np.abs(lags_window))
+    ax.set_xlim(-maxlag, maxlag)
+    xticks = np.linspace(-maxlag, maxlag, 7, dtype=int)
+    ax.set_xticks(xticks)
+
+    plt.tight_layout()
+    return ax
+
+# plot_correlation(lags, corr, 10000, normalize=False)
 
 
 def rotate_points(x: "target", y: "rotate to target", so3: bool = True):
@@ -476,6 +597,7 @@ def adjust_min(x):
 
 
 def H(p, weight: bool = True):
+
     """ENTROPY!"""
     p = p[~np.isclose(p, 0)]
     p /= p.sum()
@@ -573,16 +695,191 @@ def process_ids(ids):
     return indices
 
 
-def conditional_ray(attr):
-    """
-    conditional ray decorator
-    """
-    def decorator(func):
-        def inner(*args, **kwargs):
-            is_ray = getattr(args[0], attr)
-            return ray.remote(func) if is_ray else func
-        return inner
-    return decorator
+def lagrangian(lambdas: np.ndarray,
+               constraints: np.ndarray,
+               targets: np.ndarray,
+               regularize: bool = False,
+               sigma_reg: np.ndarray = None,
+               sigma_md: np.ndarray = None):
+
+    logits = 1 - np.dot(constraints.T, lambdas)
+    shift = logits.max()
+    unnormalized_weights = np.exp(logits - shift)
+    norm = unnormalized_weights.sum()
+    weights = unnormalized_weights / norm
+
+    L = np.log(norm) + shift + np.dot(lambdas, targets)
+    dL = targets - np.dot(constraints, weights)
+
+    if regularize:
+        L += 0.5 * np.sum(np.power(sigma_reg * lambdas, 2) + np.power(sigma_md * lambdas, 2))
+        dL += np.power(sigma_reg, 2) * lambdas + np.power(sigma_md, 2) * lambdas
+
+    return L, dL
+
+def compute_weights(lambdas: np.ndarray, constraints: np.ndarray):
+    logits = 1 - np.dot(constraints.T, lambdas)
+    # Normalize exponents to avoid overflow
+    weights = np.exp(logits - logits.max())
+    # return weights
+    return weights / np.sum(weights)
+
+def compute_kish(weights: np.ndarray = None):
+    weights /= weights.sum()
+    return 100 / (len(weights) * np.power(weights, 2).sum())
+
+def subset(indices, args):
+    assert isinstance(indices, (np.ndarray, list)), "data_indices must be type np.ndarray or list"
+    indices = np.asarray(indices) if isinstance(indices, list) else indices
+    return {i: (j[indices] if j is not None else None) for i, j in args.items()}
+
+def get_args(constraints,
+             targets,
+             lambdas0,
+             regularize: bool = False,
+             sigma_reg: list = None,
+             sigma_md: list = None,
+             data_indices: list = None,
+             whiten: bool = False,
+             standardize: bool = False
+             ):
+
+    args = []
+
+
+
+    if data_indices is not None:
+        assert isinstance(data_indices, (np.ndarray, list)), "data_indices must be type np.ndarray or list"
+        data_indices = np.asarray(data_indices) if isinstance(data_indices, list) else data_indices
+        constraints, targets, lambdas0, sigma_reg, sigma_md = [i[data_indices] if i is not None else None for i in
+                                                               [constraints, targets, lambdas0, sigma_reg, sigma_md]]
+
+    # else:
+    #     constraints, targets, lambdas0 = self.constraints, self.targets, self.lambdas0
+
+    if whiten:
+        mu = constraints.mean(1)
+        w = svd_power(constraints @ constraints.T / len(constraints.T), -1 / 2)
+        args.extend([((i.T - mu).reshape(-1, len(targets)) @ w).T for i in (constraints, targets)])
+
+    elif standardize:
+        mu = constraints.mean(1)
+        s = constraints.std(1)
+        args.extend([np.divide((i.T - mu), s, out=np.zeros_like(i.T), where=s != 0.).T
+                     for i in (constraints, targets)])
+
+    else:
+        args.extend([constraints, targets])
+
+    if regularize:
+        # assert sigma_reg is not None or self.sigma_reg is not None, (
+        #     "Must provide sigma_reg (regularization parameter)"
+        #     "as an argument or upon instantiation")
+        sigma_reg = np.zeros(len(targets)) if sigma_reg is None else sigma_reg
+        sigma_md = np.zeros(len(targets)) if sigma_md is None else sigma_md
+        args.extend([regularize,
+                     sigma_reg,
+                     sigma_md])
+
+    else:
+        args.extend([False, None, None])  # not necessary
+
+    return dict(zip(['lambdas0', 'constraints', 'targets', 'regularize', 'sigma_reg', 'sigma_md'], [lambdas0] + args))
+
+
+def reweight(constraints, targets, regularize, sigma_reg, sigma_md, lambdas0):
+
+    result = minimize(
+        lagrangian,
+        lambdas0,
+        method='L-BFGS-B',
+        jac=True,
+        args=(constraints, targets, regularize, sigma_reg, sigma_md)
+    )
+
+    weights = compute_weights(result.x, constraints)
+
+    # if store_result:
+    #     if data_indices is not None:
+    #         warnings.warn("Storing parameters and weights from reweighting performed on a subset of the data.")
+    #     self.lambdas = result.x
+    #     self.weights = weights
+    #     self.has_result = True
+
+    weighted_averages = constraints @ weights
+
+    return dict(lambdas=result.x,
+                weights=weights,
+                kish=compute_kish(weights),
+                regularize=regularize,
+                sigma_reg=sigma_reg,
+                #data_indices=data_indices,
+                #weighted_averages=weighted_averages,
+                targets=targets,
+                #rmse=rmse(weighted_averages, targets)
+                )
+
+def kish_scan_(constraints,
+               targets,
+               regularize,
+               sigma_md,
+               lambdas0,
+               indices: np.ndarray = None,
+               scale: np.array = None,
+               target_kish: float = 10,
+               sigma_reg_l: float = 0.001,
+               sigma_reg_u: float = 20,
+               steps: int = 200,
+               return_scan: bool = False):
+
+
+    # if data_indices is not None:
+
+    #     assert isinstance(data_indices, (np.ndarray, list)), "data_indices must be type np.ndarray or list"
+    #     data_indices = np.asarray(data_indices) if isinstance(data_indices, list) else data_indices
+    # else:
+    #     data_indices = np.arange(self.n_constraints)
+
+    # if target_kish is not None:
+    #     self.target_kish = target_kish
+
+    if indices is not None:
+        constraints, targets, sigma_md, lambdas0 = [i[indices] for i in (constraints, targets, sigma_md, lambdas0)]
+
+    scale = np.ones_like(targets) if scale is None else scale
+
+
+    kish = lambda sigma: reweight(constraints,
+                                  targets,
+                                  regularize,
+                                  sigma,
+                                  sigma_md,
+                                  lambdas0)["kish"]
+    reached_target = False
+    sigma_optimal = sigma_reg_u * scale
+    if return_scan:
+        scan = []
+    for sigma in np.linspace(sigma_reg_l, sigma_reg_u, steps)[::-1]:
+
+        sigma_ = scale * sigma
+        score = kish(sigma_)
+        if return_scan:
+            scan.append([sigma, score])
+
+        if score < target_kish:
+            reached_target = True
+            break
+
+        sigma_optimal = sigma_
+
+    if not reached_target: print("Did not find optimal kish")
+    #if store_sigma: self.sigma_reg[data_indices] = sigma_optimal
+
+    if return_scan:
+        return np.array(scan)
+    else:
+        return sigma_optimal
+
 
 
 class MaxEntropyReweight():
@@ -625,12 +922,11 @@ class MaxEntropyReweight():
         self.lambdas = None
 
         # error in comp data
-        self.sigma_md = np.asarray(constraints).std() if sigma_md is None else np.copy(sigma_md)
+        self.sigma_md = np.asarray(constraints).std(1) if sigma_md is None else np.copy(sigma_md)
 
         # regularization hyperparameter (one per data type)
         self.sigma_reg = np.zeros(self.n_constraints) if sigma_reg is None else np.copy(sigma_reg)
 
-        self.is_ray = False
 
     def compute_weights(self, lambdas, constraints: np.ndarray = None):
         constraints = self.constraints if constraints is None else constraints
@@ -647,34 +943,14 @@ class MaxEntropyReweight():
         entropy = -np.sum(weights * np.log(weights + 1e-12))  # Small offset to avoid log(0)
         return entropy
 
-    def compute_weighted_mean(self, weights: np.ndarray = None):
+    def compute_weighted_mean(self, constraints: np.ndarray = None, weights: np.ndarray = None):
         if weights is None:
             assert self.weights is not None, "Must provide weights if class attribute 'weights' is None"
             weights = self.weights
-        return self.constraints @ weights
+        if constraints is None:
+            constraints = self.constraints
+        return constraints @ weights
 
-    def lagrangian(self,
-                   lambdas,
-                   constraints: np.ndarray,
-                   targets: np.ndarray,
-                   regularize: bool = False,
-                   sigma_reg: np.ndarray = None,
-                   sigma_md: np.ndarray = None):
-
-        logits = 1 - np.dot(constraints.T, lambdas)
-        shift = logits.max()
-        unnormalized_weights = np.exp(logits - shift)
-        norm = unnormalized_weights.sum()
-        weights = unnormalized_weights / norm
-
-        L = np.log(norm / self.n_samples) + shift - 1 + np.dot(lambdas, targets)
-        dL = targets - np.dot(constraints, weights)
-
-        if regularize:
-            L += 0.5 * np.sum(np.power(sigma_reg * lambdas, 2) + np.power(sigma_md * lambdas, 2))
-            dL += np.power(sigma_reg, 2) * lambdas + np.power(sigma_md, 2) * lambdas
-
-        return L, dL
 
     def reweight(self,
                  regularize: bool = False,
@@ -685,71 +961,38 @@ class MaxEntropyReweight():
                  standardize: bool = False
                  ):
 
-        args = []
 
-        if data_indices is not None:
-            assert isinstance(data_indices, (np.ndarray, list)), "data_indices must be type np.ndarray or list"
-            data_indices = np.asarray(data_indices) if isinstance(data_indices, list) else data_indices
-            constraints, targets, lambdas0 = [getattr(self, i)[data_indices] for i in
-                                              ["constraints", "targets", "lambdas0"]]
+        data_indices = np.arange(self.constraints.shape[0]) if data_indices is None else data_indices
 
-        else:
-            constraints, targets, lambdas0 = self.constraints, self.targets, self.lambdas0
+        result = reweight(**get_args(self.constraints,
+                                     self.targets,
+                                     self.lambdas0,
+                                     regularize,
+                                     sigma_reg or self.sigma_reg,
+                                     self.sigma_md,
+                                     data_indices,
+                                     whiten,
+                                     standardize), )
 
-        if whiten:
-            mu = constraints.mean(0)
-            w = svd_power(constraints.T @ constraints / len(constraints), -1 / 2)
-            args.extend([(i - mu).reshape(-1, len(targets)) @ w for i in (constraints, targets)])
+        result['data_indices'] = data_indices
 
-        elif standardize:
-            mu = constraints.mean(0)
-            s = std(constraints, ax=0)
-            args.extend([np.divide((i - mu), s, out=np.zeros_like(i), where=s != 0.)
-                                     for i in (constraints, targets)])
+        constraints = self.constraints[data_indices] if data_indices is not None else self.constraints
+        targets = self.targets[data_indices] if data_indices is not None else self.targets
 
-        else:
-            args.extend([constraints, targets])
+        result['weighted_mean'] = self.compute_weighted_mean(constraints, result['weights'])
 
-        if regularize:
-            assert sigma_reg is not None or self.sigma_reg is not None, (
-                "Must provide sigma_reg (regularization parameter)"
-                "as an argument or upon instantiation")
-            args.extend([regularize,
-                         np.asarray(sigma_reg) if sigma_reg is not None else self.sigma_reg[data_indices].squeeze(),
-                         self.sigma_md[data_indices].squeeze()])
+        result['rmse'] = rmse(result['weighted_mean'], targets)
 
-        else:
-            args.extend([False, None, None])  # not necessary
-
-        result = minimize(
-            self.lagrangian,
-            lambdas0,
-            method='L-BFGS-B',
-            jac=True,
-            args=tuple(args)
-        )
-
-        weights = self.compute_weights(result.x, constraints)
 
         if store_result:
             if data_indices is not None:
                 warnings.warn("Storing parameters and weights from reweighting performed on a subset of the data.")
-            self.lambdas = result.x
-            self.weights = weights
+            self.lambdas = result['lambdas']
+            self.weights = result['weights']
             self.has_result = True
 
-        weighted_averages = constraints @ weights
 
-        return dict(lambdas=result.x,
-                    weights=weights,
-                    kish=self.compute_kish(weights),
-                    regularize=args[-2],
-                    sigma_reg=args[-1],
-                    data_indices=data_indices,
-                    weighted_averages=weighted_averages,
-                    targets=targets,
-                    rmse=rmse(weighted_averages, targets)
-                    )
+        return result
 
     def reset(self):
         self.weights = None
@@ -763,55 +1006,6 @@ class MaxEntropyReweight():
             weights = self.weights
         return 100 / (self.n_samples * np.power(weights, 2).sum())
 
-    @conditional_ray("is_ray")
-    def kish_scan_(self,
-                   data_indices: list = None,
-                   target_kish: float = None,
-                   sigma_reg_l: float = 0.001,
-                   sigma_reg_u: float = 20,
-                   steps: int = 200,
-                   scale: np.array = 1,
-                   store_sigma: bool = False,
-                   return_scan: bool = False):
-
-        if data_indices is not None:
-
-            assert isinstance(data_indices, (np.ndarray, list)), "data_indices must be type np.ndarray or list"
-            data_indices = np.asarray(data_indices) if isinstance(data_indices, list) else data_indices
-        else:
-            data_indices = np.arange(self.n_constraints)
-
-        if target_kish is not None:
-            self.target_kish = target_kish
-
-        kish = lambda sigma: self.reweight(regularize=True,
-                                           sigma_reg=sigma,
-                                           data_indices=data_indices,
-                                           store_result=False)["kish"]
-        reached_target = False
-        sigma_optimal = sigma_reg_u * scale
-        if return_scan:
-            scan = []
-        for sigma in np.linspace(sigma_reg_l, sigma_reg_u, steps)[::-1]:
-
-            sigma_ = scale * sigma
-            score = kish(sigma_)
-            if return_scan:
-                scan.append([sigma, score])
-
-            if score < self.target_kish:
-                reached_target = True
-                break
-
-            sigma_optimal = sigma_
-
-        if not reached_target: print("Did not find optimal kish")
-        if store_sigma: self.sigma_reg[data_indices] = sigma_optimal
-
-        if return_scan:
-            return np.array(scan)
-        else:
-            return sigma_optimal
 
     def kish_scan(self,
                   data_indices: list = None,
@@ -819,27 +1013,45 @@ class MaxEntropyReweight():
                   sigma_reg_l: float = 0.001,
                   sigma_reg_u: float = 20,
                   steps: int = 200,
-                  scale: np.array = 1,
+                  scale: np.array = None,
+                  standardize: bool = False,
+                  whiten: bool = False,
                   store_sigma: bool = False,
-                  multi_proc: bool = False):
+                  return_scan: bool = False,
+                  #multi_proc: bool = False,
+                  ):
 
-        args = dict(self=self,
-                    data_indices=data_indices,
-                    target_kish=target_kish,
-                    sigma_reg_l=sigma_reg_l,
-                    sigma_reg_u=sigma_reg_u,
-                    steps=steps,
-                    scale=scale,
-                    store_sigma=store_sigma
-                    )
 
-        if multi_proc:
-            self.is_ray = True
-            return_ = self.kish_scan_().remote(**args)
-            self.is_ray = False
-            return return_
-        else:
-            return self.kish_scan_()(**args)
+        args = get_args(self.constraints,
+                        self.targets,
+                        self.lambdas0,
+                        True,
+                        self.sigma_reg,
+                        self.sigma_md,
+                        data_indices,
+                        whiten,
+                        standardize)
+
+        args.pop('sigma_reg')
+
+        result = kish_scan_(**args,
+                            scale=scale,
+                            target_kish = self.target_kish or target_kish,
+                            sigma_reg_l=sigma_reg_l,
+                            sigma_reg_u=sigma_reg_u,
+                            steps=steps,
+                            return_scan=return_scan
+                            )
+
+        if store_sigma and not return_scan:
+            if data_indices is not None:
+                self.sigma_reg[data_indices] = result
+            else:
+                self.sigma_reg = result
+
+
+
+        return result
 
     def optimize_sigma_reg(self,
                            indices_list: list,
@@ -849,17 +1061,56 @@ class MaxEntropyReweight():
                            global_sigma_reg_l: float = 0.01,
                            global_sigma_reg_u: float = 20,
                            global_steps: int = 60,
+                           standardize: bool = False,
+                           whiten: bool = False,
                            multi_proc: bool = False
                            ):
 
         # regularization for each data type
 
-        single_regs = np.concatenate([np.atleast_1d(self.kish_scan(i,
-                                                     sigma_reg_l=single_sigma_reg_l,
-                                                     sigma_reg_u=single_sigma_reg_u,
-                                                     steps=single_steps,
-                                                     multi_proc=multi_proc)).repeat(len(i))
-                                      for i in indices_list])
+        args = get_args(self.constraints,
+                        self.targets,
+                        self.lambdas0,
+                        True,
+                        self.sigma_reg,
+                        self.sigma_md,
+                        None,
+                        whiten,
+                        standardize)
+
+        args.pop('sigma_reg')
+
+        if multi_proc:
+            args = {i : ray.put(j) for i, j in args.items()}
+            remote = ray.remote(kish_scan_)
+            # launch
+
+            single_regs = np.concatenate(ray.get([remote.remote(**args,
+                                                                sigma_reg_l=single_sigma_reg_l,
+                                                                sigma_reg_u=single_sigma_reg_u,
+                                                                steps=single_steps,
+                                                                indices=i
+                                                                )
+                                                  for i in indices_list]))
+
+            for i in args.values():
+                ray.internal.free(i)
+            ray.shutdown()
+
+            #regs = ray.get(refs)  # <-- materialize to floats
+
+            # single_regs = np.concatenate([
+            #     np.atleast_1d(reg).repeat(len(i))
+            #     for reg, i in zip(result, indices_list)
+            # ])
+
+        else:
+            single_regs = np.concatenate([self.kish_scan(i,
+                                                         sigma_reg_l=single_sigma_reg_l,
+                                                         sigma_reg_u=single_sigma_reg_u,
+                                                         steps=single_steps,
+                                                         )
+                                          for i in indices_list])
 
         # global regularization - find single scalar for regularization parameters of each data type
         self.kish_scan(scale=single_regs,
@@ -867,6 +1118,8 @@ class MaxEntropyReweight():
                        sigma_reg_l=global_sigma_reg_l,
                        sigma_reg_u=global_sigma_reg_u,
                        steps=global_steps,
+                       standardize = standardize,
+                       whiten =  whiten,
                        )
         return
 
@@ -1145,4 +1398,339 @@ class DensityComparator():
         return
 
 
+
+#
+#
+# def conditional_ray(attr):
+#     """
+#     conditional ray decorator
+#     """
+#     def decorator(func):
+#         def inner(*args, **kwargs):
+#             is_ray = getattr(args[0], attr)
+#             return ray.remote(func) if is_ray else func
+#         return inner
+#     return decorator
+#
+#
+# class MaxEntropyReweight():
+#     def __init__(self,
+#                  constraints: list,
+#                  targets: list,
+#                  sigma_md: list = None,
+#                  sigma_reg: list = None,
+#                  target_kish: float = 10):
+#
+#         """
+#         constraints : list of numpy arrays each with shape (N_observations, ).
+#                       Each array should be paired with a target.
+#                       Optimization is performed to find a set of weights (N_observations)
+#                       that will result in a weighted average for each constraint that equals the corresponding target.
+#
+#         targets : list of targets for each constraint.
+#
+#         sigma_md : error of each constraint data type estimated from blocking (correlated time series data)
+#
+#         sigma_reg : regularization parameter for each constraint, class method optimize_sigma_reg will find these
+#
+#         target_kish : minimum kish required when searching for sigma_reg for each data type.
+#                       Will not necessarily match the kish of the final reweighting of all constraints combined.
+#
+#         """
+#
+#         self.constraints = np.asarray(constraints)
+#         self.targets = np.asarray(targets)
+#         self.lambdas0 = np.zeros(len(constraints))
+#         self.n_samples = len(constraints[0])
+#         self.n_constraints = len(self.lambdas0)
+#
+#         # regularizations
+#         self.target_kish = target_kish
+#
+#         # result status
+#         self.has_result = False
+#         self.weights = None
+#         self.lambdas = None
+#
+#         # error in comp data
+#         self.sigma_md = np.asarray(constraints).std(1) if sigma_md is None else np.copy(sigma_md)
+#
+#         # regularization hyperparameter (one per data type)
+#         self.sigma_reg = np.zeros(self.n_constraints) if sigma_reg is None else np.copy(sigma_reg)
+#
+#         self.is_ray = False
+#
+#     def compute_weights(self, lambdas, constraints: np.ndarray = None):
+#         constraints = self.constraints if constraints is None else constraints
+#         logits = 1 - np.dot(constraints.T, lambdas)
+#         # Normalize exponents to avoid overflow
+#         weights = np.exp(logits - logits.max())
+#         # return weights
+#         return weights / np.sum(weights)
+#
+#     def compute_entropy(self, weights: np.ndarray = None, *args):
+#         if weights is None:
+#             assert self.weights is not None, "Must provide weights if class attribute 'weights' is None"
+#             weights = self.weights
+#         entropy = -np.sum(weights * np.log(weights + 1e-12))  # Small offset to avoid log(0)
+#         return entropy
+#
+#     def compute_weighted_mean(self, weights: np.ndarray = None):
+#         if weights is None:
+#             assert self.weights is not None, "Must provide weights if class attribute 'weights' is None"
+#             weights = self.weights
+#         return self.constraints @ weights
+#
+#     def lagrangian(self,
+#                    lambdas,
+#                    constraints: np.ndarray,
+#                    targets: np.ndarray,
+#                    regularize: bool = False,
+#                    sigma_reg: np.ndarray = None,
+#                    sigma_md: np.ndarray = None):
+#
+#         logits = 1 - np.dot(constraints.T, lambdas)
+#         shift = logits.max()
+#         unnormalized_weights = np.exp(logits - shift)
+#         norm = unnormalized_weights.sum()
+#         weights = unnormalized_weights / norm
+#
+#         L = np.log(norm / self.n_samples) + shift - 1 + np.dot(lambdas, targets)
+#         dL = targets - np.dot(constraints, weights)
+#
+#         if regularize:
+#             L += 0.5 * np.sum(np.power(sigma_reg * lambdas, 2) + np.power(sigma_md * lambdas, 2))
+#             dL += np.power(sigma_reg, 2) * lambdas + np.power(sigma_md, 2) * lambdas
+#
+#         return L, dL
+#
+#     def reweight(self,
+#                  regularize: bool = False,
+#                  sigma_reg: list = None,
+#                  data_indices: list = None,
+#                  store_result: bool = False,
+#                  whiten: bool = False,
+#                  standardize: bool = False
+#                  ):
+#
+#         args = []
+#
+#         if data_indices is not None:
+#             assert isinstance(data_indices, (np.ndarray, list)), "data_indices must be type np.ndarray or list"
+#             data_indices = np.asarray(data_indices) if isinstance(data_indices, list) else data_indices
+#             constraints, targets, lambdas0 = [getattr(self, i)[data_indices] for i in
+#                                               ["constraints", "targets", "lambdas0"]]
+#
+#         else:
+#             constraints, targets, lambdas0 = self.constraints, self.targets, self.lambdas0
+#
+#         if whiten:
+#             mu = constraints.mean(1)
+#             w = svd_power(constraints @ constraints.T / len(constraints.T), -1 / 2)
+#             args.extend([((i.T - mu).reshape(-1, len(targets)) @ w).T for i in (constraints, targets)])
+#
+#         elif standardize:
+#             mu = constraints.mean(1)
+#             s = std(constraints, ax=1)
+#             args.extend([np.divide((i.T - mu), s, out=np.zeros_like(i.T), where=s != 0.).T
+#                          for i in (constraints, targets)])
+#
+#         else:
+#             args.extend([constraints, targets])
+#
+#         if regularize:
+#             assert sigma_reg is not None or self.sigma_reg is not None, (
+#                 "Must provide sigma_reg (regularization parameter)"
+#                 "as an argument or upon instantiation")
+#             args.extend([regularize,
+#                          np.asarray(sigma_reg) if sigma_reg is not None else self.sigma_reg[data_indices].squeeze(),
+#                          self.sigma_md[data_indices].squeeze()])
+#
+#         else:
+#             args.extend([False, None, None])  # not necessary
+#
+#         result = minimize(
+#             self.lagrangian,
+#             lambdas0,
+#             method='L-BFGS-B',
+#             jac=True,
+#             args=tuple(args)
+#         )
+#
+#         weights = self.compute_weights(result.x, constraints)
+#
+#         if store_result:
+#             if data_indices is not None:
+#                 warnings.warn("Storing parameters and weights from reweighting performed on a subset of the data.")
+#             self.lambdas = result.x
+#             self.weights = weights
+#             self.has_result = True
+#
+#         weighted_averages = constraints @ weights
+#
+#         return dict(lambdas=result.x,
+#                     weights=weights,
+#                     kish=self.compute_kish(weights),
+#                     regularize=args[-2],
+#                     sigma_reg=args[-1],
+#                     data_indices=data_indices,
+#                     weighted_averages=weighted_averages,
+#                     targets=targets,
+#                     rmse=rmse(weighted_averages, targets)
+#                     )
+#
+#     def reset(self):
+#         self.weights = None
+#         self.lambdas = None
+#         self.has_result = False
+#         return
+#
+#     def compute_kish(self, weights: np.ndarray = None):
+#         if weights is None:
+#             assert self.weights is not None, "Must provide weights if class attribute 'weights' is None"
+#             weights = self.weights
+#         return 100 / (self.n_samples * np.power(weights, 2).sum())
+#
+#     @conditional_ray("is_ray")
+#     def kish_scan_(self,
+#                    data_indices: list = None,
+#                    target_kish: float = None,
+#                    sigma_reg_l: float = 0.001,
+#                    sigma_reg_u: float = 20,
+#                    steps: int = 200,
+#                    scale: np.array = 1.,
+#                    standardize: bool = False,
+#                    whiten: bool = False,
+#                    store_sigma: bool = False,
+#                    return_scan: bool = False):
+#
+#         if data_indices is not None:
+#
+#             assert isinstance(data_indices, (np.ndarray, list)), "data_indices must be type np.ndarray or list"
+#             data_indices = np.asarray(data_indices) if isinstance(data_indices, list) else data_indices
+#         else:
+#             data_indices = np.arange(self.n_constraints)
+#
+#         if target_kish is not None:
+#             self.target_kish = target_kish
+#
+#         kish = lambda sigma: self.reweight(regularize=True,
+#                                            sigma_reg=sigma,
+#                                            data_indices=data_indices,
+#                                            store_result=False,
+#                                            standardize=standardize,
+#                                            whiten=whiten)["kish"]
+#         reached_target = False
+#         sigma_optimal = sigma_reg_u * scale
+#         if return_scan:
+#             scan = []
+#         for sigma in np.linspace(sigma_reg_l, sigma_reg_u, steps)[::-1]:
+#
+#             sigma_ = scale * sigma
+#             score = kish(sigma_)
+#             if return_scan:
+#                 scan.append([sigma, score])
+#
+#             if score < self.target_kish:
+#                 reached_target = True
+#                 break
+#
+#             sigma_optimal = sigma_
+#
+#         if not reached_target: print("Did not find optimal kish")
+#         if store_sigma: self.sigma_reg[data_indices] = sigma_optimal
+#
+#         if return_scan:
+#             return np.array(scan)
+#         else:
+#             return sigma_optimal
+#
+#     def kish_scan(self,
+#                   data_indices: list = None,
+#                   target_kish: float = None,
+#                   sigma_reg_l: float = 0.001,
+#                   sigma_reg_u: float = 20,
+#                   steps: int = 200,
+#                   scale: np.array = 1,
+#                   standardize: bool = False,
+#                   whiten: bool = False,
+#                   store_sigma: bool = False,
+#                   multi_proc: bool = False):
+#
+#         args = dict(self=self,
+#                     data_indices=data_indices,
+#                     target_kish=target_kish,
+#                     sigma_reg_l=sigma_reg_l,
+#                     sigma_reg_u=sigma_reg_u,
+#                     steps=steps,
+#                     scale=scale,
+#                     store_sigma=store_sigma,
+#                     standardize = standardize,
+#                     whiten =  whiten,
+#                     )
+#
+#         if multi_proc:
+#             self.is_ray = True
+#             return_ = self.kish_scan_().remote(**args)
+#             self.is_ray = False
+#             return return_
+#         else:
+#             return self.kish_scan_()(**args)
+#
+#     def optimize_sigma_reg(self,
+#                            indices_list: list,
+#                            single_sigma_reg_l: float = 0.001,
+#                            single_sigma_reg_u: float = 20,
+#                            single_steps: int = 200,
+#                            global_sigma_reg_l: float = 0.01,
+#                            global_sigma_reg_u: float = 20,
+#                            global_steps: int = 60,
+#                            standardize: bool = False,
+#                            whiten: bool = False,
+#                            multi_proc: bool = False
+#                            ):
+#
+#         # regularization for each data type
+#
+#         if multi_proc:
+#             # launch
+#             refs = [self.kish_scan(i,
+#                                    sigma_reg_l=single_sigma_reg_l,
+#                                    sigma_reg_u=single_sigma_reg_u,
+#                                    steps=single_steps,
+#                                    multi_proc=True,
+#                                    standardize=standardize,
+#                                    whiten=whiten)
+#                     for i in indices_list]
+#
+#             regs = ray.get(refs)  # <-- materialize to floats
+#
+#             single_regs = np.concatenate([
+#                 np.atleast_1d(reg).repeat(len(i))
+#                 for reg, i in zip(regs, indices_list)
+#             ])
+#
+#         else:
+#             single_regs = np.concatenate([
+#                 np.atleast_1d(self.kish_scan(i,
+#                                              sigma_reg_l=single_sigma_reg_l,
+#                                              sigma_reg_u=single_sigma_reg_u,
+#                                              steps=single_steps,
+#                                              multi_proc=False,
+#                                              standardize=standardize,
+#                                              whiten=whiten)
+#                               ).repeat(len(i))
+#                 for i in indices_list
+#             ])
+#
+#         # global regularization - find single scalar for regularization parameters of each data type
+#         self.kish_scan(scale=single_regs,
+#                        store_sigma=True,
+#                        sigma_reg_l=global_sigma_reg_l,
+#                        sigma_reg_u=global_sigma_reg_u,
+#                        steps=global_steps,
+#                        standardize = standardize,
+#                        whiten =  whiten,
+#                        )
+#         return
 

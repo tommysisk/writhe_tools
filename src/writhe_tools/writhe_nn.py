@@ -162,16 +162,20 @@ class TorchWrithe(nn.Module):
     def laplacian_(self, wr):
         assert wr.ndim == 2, "arg 'wr' must be 2D"  # Case: No extra dimension (scalar sum)
         triu = self.zeros.repeat(len(wr), 1).scatter_add_(1,
-                                                          self.indices.repeat(len(wr), 1),
-                                                          wr.repeat_interleave(4, 1))
+                                                          self.indices.expand(len(wr), -1),
+                                                           wr.repeat_interleave(4, 1))
 
-        return torch.nn.functional.pad(triu, (1, 1), 'constant', 0.0).repeat(1, 2)[:, self.sort]
+        return torch.nn.functional.pad(triu, (1, 1),
+                                       'constant',
+                                       0.0).repeat(1, 2)[:, self.sort]
 
     def laplacian(self, wr):
         if wr.ndim == 2:  # Case: No extra dimension (scalar sum)
             return self.laplacian_(wr)
         else:  # Case: Extra dimension present (vector sum)
-            return torch.stack([self.laplacian_(i) for i in wr.permute(2, 0, 1)], dim=-1)
+            B, D, C = wr.shape
+            return self.laplacian(wr.permute(0, 2, 1).reshape(B * C, D)).reshape(B, C, -1).permute(0, 2, 1)
+            #return torch.stack([self.laplacian_(i) for i in wr.permute(2, 0, 1)], dim=-1)
 
     def compute_writhe_vector(self, xyz):
         assert self.segments.shape[-1] == 4, "Segment indexing matrix must have last dim of 4."

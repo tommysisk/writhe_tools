@@ -17,6 +17,7 @@ from numba import njit, prange
 import os
 from typing import Optional, Union, List
 from functools import partial
+import math
 
 def mean(x: np.ndarray, weights: np.ndarray = None, ax: int = 0):
 
@@ -58,8 +59,19 @@ canonical_residues = np.array(['ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLU', 'GLN', 
                       'HIS', 'ILE', 'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER',
                       'THR', 'TRP', 'TYR', 'VAL'])
 
+canonical_codes = np.array([
+    'A', 'R', 'N', 'D', 'C', 'E', 'Q', 'G',
+    'H', 'I', 'L', 'K', 'M', 'F', 'P', 'S',
+    'T', 'W', 'Y', 'V'])
 
-def get_residues(traj: md.Trajectory, index: Optional[Union[List[int], np.ndarray]] = None):
+to_codes_ = dict(zip(canonical_residues, canonical_codes))
+def to_codes(x):
+
+    return np.vectorize(to_codes_.__getitem__)(x)
+
+
+def get_residues(traj: md.Trajectory, slice_sequence: bool = False,
+                 index: Optional[Union[List[int], np.ndarray]] = None):
     sequence = np.array([str(traj.top.residue(i)) for i in range(traj.n_residues)])
     if index is not None:
         return sequence[index.astype(int)] if isinstance(index, np.ndarray)\
@@ -67,7 +79,7 @@ def get_residues(traj: md.Trajectory, index: Optional[Union[List[int], np.ndarra
     else:
         residue_index = np.array([getattr(traj.top.atom(int(i)).residue, 'index')
                                   for i in traj.top.select("protein and name CA")]).astype(int)
-    return sequence, residue_index
+    return sequence[residue_index] if slice_sequence else sequence, residue_index
 
 
 def one_hot_residue_type(sequence: Union[list, np.ndarray],
@@ -124,7 +136,7 @@ def parallel_distances(xyz, pairs, length=None):
     return distances.T
 
 def to_distance_matrix(distances: np.ndarray,
-                       n: int,
+                       n: int = None,
                        m: int = None,
                        d0: int = 1):
     distances = distances.squeeze()
@@ -133,6 +145,11 @@ def to_distance_matrix(distances: np.ndarray,
 
     # info about flattened distance matrix
     N, d = distances.shape
+
+    if n is None:
+        a, b, c = 1, (1 - 2 * d0), (d0**2 - d0 - 2 * d)
+
+        n = int((-b + np.sqrt(b ** 2 - 4 * a * c)) / (2 * a))
 
     # intra molecular distances
     if m is None:
@@ -157,19 +174,23 @@ def residue_distances(traj,
                       ):
     # intra distance case
     if indices is not None:
-        return md.compute_contacts(traj, indices, periodic=periodic)[0], indices if not parallel \
-            else parallel_distances(traj.xyz, indices,
+        return md.compute_contacts(traj.center_coordinates() if not periodic else traj,
+                                   indices,
+                                   periodic=periodic)[0], indices if not parallel \
+            else parallel_distances((traj.center_coordinates() if not periodic else traj).xyz,
+                                    indices,
                                     length=traj.unitcell_lengths if periodic else None)
 
     assert index_0 is not None, 'If indices are not supplied, must at least supply index_0'
 
 
-
-
     if index_1 is None:
         indices = combinations(index_0)
-        return md.compute_contacts(traj, indices, periodic=periodic)[0], indices if not parallel \
-            else parallel_distances(traj.xyz, indices,
+        return md.compute_contacts(traj.center_coordinates() if not periodic else traj,
+                                   indices,
+                                   periodic=periodic)[0], indices if not parallel \
+            else parallel_distances((traj.center_coordinates() if not periodic else traj).xyz,
+                                    indices,
                                     length=traj.unitcell_lengths if periodic else None)
 
     # inter distance case
@@ -195,6 +216,7 @@ class ResidueDistances:
                  contact_cutoff:float=0.5,
                  parallel: bool = False,
                  d0: int = 0,
+                 periodic: bool = True,
                  args: "dict or path (str) to saved dict" = None):
 
         # restore the class from dictionary that it saves
@@ -210,23 +232,29 @@ class ResidueDistances:
                 "Minimum inputs are MDTraj object and index_0 (residue indices array)"
                 " if an args dict saved by this class is not provided")
             self.contact_cutoff = contact_cutoff
+            self.d0 = d0
 
             if index_1 is None:
                 self.chain_id_0, self.chain_id_1 = [chain_id_0] * 2
-                self.residues_0, self.residues_1 = [get_residues(traj, index_0)] * 2
+                self.residues_0, self.residues_1 = [get_residues(traj, index=index_0)] * 2
                 self.n = len(index_0)
                 self.m = None
                 self.prefix = "Intra"
-                self.distances = residue_distances(traj, index_0,
-                                                   parallel=parallel)[0]
+                i, j = combinations(index_0).T
+                indices = np.stack([i, j], 1)[abs(i - j) >= d0]
+                #indices = np.stack(np.triu_indices(self.n, d0), 1)
+                self.distances = residue_distances(traj, indices=indices,
+                                                   parallel=parallel,
+                                                   periodic=periodic)[0]
 
             else:
                 self.chain_id_0, self.chain_id_1 = chain_id_0, chain_id_1
-                self.residues_0, self.residues_1 = [get_residues(traj, i) for i in  (index_0, index_1)]
+                self.residues_0, self.residues_1 = [get_residues(traj, index=i) for i in  (index_0, index_1)]
                 self.n, self.m = map(len, (index_0, index_1))
                 self.prefix = "Inter"
                 self.distances = residue_distances(traj, index_0, index_1,
-                                                   parallel=parallel)[0]
+                                                   parallel=parallel,
+                                                   periodic=periodic)[0]
 
         pass
 
@@ -259,7 +287,7 @@ class ResidueDistances:
 
     def sub_diag(self, d):
         assert self.prefix == "Intra", "Must be intra molecular distances to subsample distances"
-        return self.distances[:, triu_flat_indices(self.n, 1, d)]
+        return self.distances[:, triu_flat_indices(self.n, self.d0, d)]
 
     def matrix(self,
                distances: np.ndarray=None,
@@ -276,7 +304,8 @@ class ResidueDistances:
         return to_distance_matrix(to_contacts(distances, cut_off or self.contact_cutoff)\
                                   if contacts else distances,
                                   self.n,
-                                  self.m)
+                                  self.m,
+                                  self.d0)
 
     def contacts(self, cut_off: float=None):
         cut_off = cut_off if cut_off is not None else self.contact_cutoff
@@ -293,9 +322,12 @@ class ResidueDistances:
              line_plot_args: dict = None,
              xticks_rotation: float = 0,
              weights: np.ndarray = None,
+             vmax: float = None,
+             vmin: float = 0,
+             grid_alpha: float = .1,
+             grid_linewidth: float = 0.2,
+             grid_color: str = 'gray',
              ax=None):
-
-
 
         if contacts:
             matrix = self.contacts(contact_cutoff)
@@ -344,7 +376,16 @@ class ResidueDistances:
                             "label_stride": label_stride,
                             "font_scale": font_scale,
                             "ax": ax,
-                            "cmap": cmap}
+                            "cmap": cmap,
+                            'vmin': vmin,
+                            'vmax': vmax,
+                            'grid': True,
+                            'alpha': 0.85,
+                            'grid_alpha':  grid_alpha,
+                            'grid_linewidth': grid_linewidth,
+                            'grid_color': grid_color,
+                            'grid_spacing': 1,
+                            }
 
         if line_plot_args is None:
             return plot_distance_matrix(**matrix_plot_args)
@@ -352,10 +393,10 @@ class ResidueDistances:
         else:
             line_plot_args["xticks"] = self.residues_1
             line_plot_args["x"] = np.arange(len(self.residues_1))
-            line_plot_args["font_scale"] = 1
+            #line_plot_args["font_scale"] = 1
             line_plot_args["hide_title"] = True
 
-            matrix_plot_args["font_scale"] = 1.2
+            #matrix_plot_args["font_scale"] = 1.2
             matrix_plot_args["hide_x"] = True
             matrix_plot_args["xlabel"] = None
             matrix_plot_args["xticks"] = None
@@ -448,6 +489,108 @@ residue_volumes = dict(zip(['A', 'R', 'N', 'D', 'C', 'E', 'Q', 'G', 'H', 'I', 'L
                             163.0, 264.0, 255.0, 165.0]))
 
 
+
+
+def curvature_menger(xyz: np.ndarray, l: int = 1, eps: float = 1e-12) -> np.ndarray:
+    xyz = np.asarray(xyz)
+    if xyz.ndim != 3 or xyz.shape[-1] != 3:
+        raise ValueError(f"xyz must have shape (n_samples, n_points, 3); got {xyz.shape}")
+    if not (isinstance(l, (int, np.integer)) and l >= 1):
+        raise ValueError(f"l must be an integer >= 1; got {l!r}")
+    if 2 * l >= xyz.shape[1]:
+        raise ValueError(f"Need 2*l < n_points; got l={l}, n_points={xyz.shape[1]}")
+
+    u, v, w = xyz[:, l:-l] - xyz[:, :-2*l], xyz[:, 2*l:] - xyz[:, l:-l], xyz[:, 2*l:] - xyz[:, :-2*l]
+    k = 2.0 * np.linalg.norm(np.cross(u, w), axis=-1) / (np.linalg.norm(u, axis=-1) * np.linalg.norm(v, axis=-1) * np.linalg.norm(w, axis=-1) + eps)
+    return np.pad(k, ((0, 0), (l, l)), mode="constant")
+
+def bending_energy(xyz: np.ndarray, l: int = 1, eps: float = 1e-12) -> np.ndarray:
+    """
+
+    """
+    kappa = curvature_menger(xyz, l=l, eps=eps)                           # (n_samples, n_points)
+    left  = np.linalg.norm(xyz[:, l:-l] - xyz[:, :-2*l], axis=-1)         # (n_samples, n_points-2l)
+    right = np.linalg.norm(xyz[:, 2*l:] - xyz[:, l:-l], axis=-1)          # (n_samples, n_points-2l)
+    ds    = 0.5 * (left + right)                                          # local arc-length weight at vertices
+    return np.sum((kappa[:, l:-l] ** 2) * ds, axis=-1)                    # (n_samples,)
+
+
+def tangent_corr(xyz: np.ndarray,
+                 l: int = 1,
+                 mode: str = "disjoint",
+                 eps: float = 1e-12):
+    """
+    xyz: (n_samples, n_points, 3)
+    l: scale parameter (integer >= 1)
+    mode:
+      - "sliding": window-sum of unit tangents with overlap
+      - "disjoint": non-overlapping block-sum of unit tangents (no overlap)
+      - "chord": chord tangents p[i+l]-p[i]
+
+    Returns:
+      ell:         (n_samples,)  per-sample persistence:
+                   ell = -ds_eff / log(<t·t_next>)
+      ds_eff_mean: scalar        mean effective segment length over samples
+    """
+    xyz = np.asarray(xyz)
+    if xyz.ndim != 3 or xyz.shape[-1] != 3:
+        raise ValueError(f"xyz must have shape (n_samples, n_points, 3); got {xyz.shape}")
+    if not (isinstance(l, (int, np.integer)) and l >= 1):
+        raise ValueError(f"l must be an integer >= 1; got {l!r}")
+    if mode not in {"sliding", "disjoint", "chord"}:
+        raise ValueError(f"mode must be one of {{'sliding','disjoint','chord'}}; got {mode!r}")
+
+    d = np.diff(xyz, axis=1)
+    if d.shape[1] < 2:
+        raise ValueError("Need n_points >= 3.")
+
+    if mode == "chord":
+        if l >= xyz.shape[1]:
+            raise ValueError(f"For mode='chord' need l <= n_points-1; got l={l}, n_points={xyz.shape[1]}")
+        D = xyz[:, l:] - xyz[:, :-l]  # (n_samples, n_points-l, 3)
+        Dn = np.linalg.norm(D, axis=-1, keepdims=True)
+        t = D / (Dn + eps)
+        ds_eff = Dn[..., 0].mean(-1)  # per-sample, average length of displacements
+
+    else:
+        seg = d
+        segn = np.linalg.norm(seg, axis=-1, keepdims=True)
+        t0 = seg / (segn + eps)  # unit tangents, (n_samples, n_seg, 3)
+
+        if mode == "sliding":
+            if l > t0.shape[1]:
+                raise ValueError(f"For mode='sliding' need l <= n_seg; got l={l}, n_seg={t0.shape[1]}")
+            if l == 1:
+                t = t0
+            else:
+                cs = np.cumsum(np.pad(t0, ((0, 0), (1, 0), (0, 0))), axis=1)
+                t = cs[:, l:] - cs[:, :-l]
+            t = t / (np.linalg.norm(t, axis=-1, keepdims=True) + eps)
+            ds_eff = np.linalg.norm(seg, axis=-1).mean(-1)  # per-sample
+
+        else:  # "disjoint"
+            n_seg = t0.shape[1]
+            n_blk = n_seg // l
+            if n_blk < 2:
+                raise ValueError(f"For mode='disjoint' need at least 2 blocks: n_seg//l >= 2 (n_seg={n_seg}, l={l})")
+            t = t0[:, :n_blk * l].reshape(t0.shape[0], n_blk, l, 3).sum(2)
+            t = t / (np.linalg.norm(t, axis=-1, keepdims=True) + eps)
+
+            seglen = np.linalg.norm(seg, axis=-1)[:, :n_blk * l].reshape(t0.shape[0], n_blk, l).sum(2)
+            ds_eff = seglen.mean(-1)  # per-sample
+
+    n = t.shape[1]
+    if n > 1:
+        c1 = (t[:, :-1] * t[:, 1:]).sum(-1).mean(-1)  # per-sample <t_i·t_{i+1}>
+    else:
+        c1 = np.full((xyz.shape[0],), np.nan)
+
+    ell = np.where(c1 > 0, -ds_eff / np.log(np.clip(c1, eps, 1 - eps)), np.nan)
+    return ell, ds_eff.mean()
+
+
+
+
 def calc_rsa(traj: "traj object or str",
              pdb: str = None,
              file_name: str = None,
@@ -528,7 +671,7 @@ def Rg(x: np.ndarray) -> float:
         x : (n_frames, n_atoms, 3) np.ndarray
     """
 
-    return np.power(np.linalg.norm(x - x.mean(-1, keepdims=True), axis=-1), 2).mean(-1) ** (1/2)
+    return np.power(np.linalg.norm(x - x.mean(1, keepdims=True), axis=2), 2).mean(-1) ** (1/2)
 
 
 def traj_slice(traj, selection):
