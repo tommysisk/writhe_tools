@@ -34,7 +34,6 @@ def pbc_correct(displacements: torch.Tensor,
     return displacements - lengths_broadcast * torch.round(displacements / lengths_broadcast)
 
 
-
 @torch.jit.script
 def writhe_segments(xyz: torch.Tensor,
                     segments: torch.Tensor,
@@ -70,22 +69,23 @@ def writhe_segments(xyz: torch.Tensor,
     segments, xyz = segments.unsqueeze(0) if segments.ndim < 2 else segments, \
         xyz.unsqueeze(0) if xyz.ndim < 3 else xyz
 
-    dx = (-xyz[:, segments[:, :2], None] + xyz[:, segments[:, None, 2:]]).reshape(-1, len(segments), 4, 3)
-
     if not periodic:
-        dx = divnorm(dx)
+
+        dx = divnorm(-xyz[:, segments[:, :2], None]+ xyz[:, segments[:, None, 2:]]
+                     ).reshape(-1, len(segments), 4, 3)
+
 
         signs = (torch.cross(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]],
                              xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]],
                              dim=-1) * dx[:, :, 0]).sum(-1).sign()
-
     else:
+        # need to use a single image convention - we center it on the first point of 4
+        dx = pbc_correct(xyz[:, segments[:, 1:4]] - xyz[:, segments[:, 0:1]], lengths)   # [B-A, C-A, D-A]
 
-        dx = divnorm(pbc_correct(dx, lengths))
+        signs = (torch.cross(dx[:, :, 2] - dx[:, :, 1], dx[:, :, 0], dim=-1) * dx[:, :, 1]).sum(-1).sign()
 
-        signs = (torch.cross(pbc_correct(xyz[:, segments[:, 3]] - xyz[:, segments[:, 2]], lengths),
-                             pbc_correct(xyz[:, segments[:, 1]] - xyz[:, segments[:, 0]], lengths),
-                             dim=-1) * dx[:, :, 0]).sum(-1).sign()
+        dx = divnorm(torch.cat((dx[:, :, 1:3], dx[:, :, 1:3] - dx[:, :, 0:1]), dim=2)) # [C-A, D-A, C-B, D-B]
+
 
     if use_cross:
         dx = divnorm(torch.cross(dx[:, :, [0, 1, 3, 2]],
