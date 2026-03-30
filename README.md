@@ -80,14 +80,15 @@ pip install writhe-tools[graph]
 
 ---
 
-```bash
-pip install writhe-tools[mdtraj]
-```
-
-- Installs `mdtraj` to enable trajectory and structure file loading
-- Provides access to a set of analysis tools in:
+A working installation of `mdtraj` allows usage of a set of analysis tools in:
     - ```writhe_tools.md_tools```
 
+Given that `mdtraj` is not maintained, issues may arise in its installation on some older linux machines.
+After installing `writhe-tools[stats]`, We have found that installing `mdtraj` using the following works reliably
+
+```bash
+pip install "mdtraj==1.10.3" --no-deps
+```
 
 ---
 
@@ -134,6 +135,10 @@ from the saved result to continue analysis or visualization.
 
 writhe.compute_writhe(length=1)
 
+# OR use GPUs if they are available, will automatically distribute to all GPU devices
+
+writhe.compute_writhe(length=1, cuda=True)
+
 # results are stored to the class instance (see details in following cell about compute_writhe)
 
 # save the result with default arguments (None, see below next code block)
@@ -166,7 +171,12 @@ import matplotlib.pyplot as plt
 writhe.compute_writhe(length=5)
 fig, axes = plt.subplots(1, 2, figsize=(14, 3))
 ax = axes.flat
-writhe.plot_writhe_matrix(index=None, ax=ax[0], label_stride=8)  #xticks=residues, yticks=residues, to match example
+writhe.plot_writhe_matrix(index=None, #can be int, list of array of indices to average over, None takes all vales
+                          ax=ax[0], 
+                          label_stride=8,
+                          dscr=None, # custom description if plotting a subset or cluster)
+                          )
+                        #  #xticks=residues, yticks=residues, to match example
 writhe.plot_writhe_total(window=250, ax=ax[1])
 ax[1].hlines(0, 0, len(xyz), ls="--", color="gray")
 fig.tight_layout()
@@ -180,10 +190,19 @@ Further analysis, such as time-lagged canonical correlation analysis and VAMP-2 
 ```jupyterpython
 from writhe_tools.tcca import tCCA
 from writhe_tools.plots import fes2d
+from writhe_tools.stats import Kmeans
+import matplotlib.pyplot as plt
+writhe.compute_writhe(length=1)
 tcca = tCCA(writhe.writhe_features, lag=30).fit()
 print(f"VAMP2 Score (dim 10) : {(tcca.svals[:10]**2).sum()}")
 projection = tcca.transform(dim=2, scale=False)
 fes2d(projection)
+dtraj, frames = Kmeans(projection, n_dim=2, n_clusters=4)
+fig, axes = plt.subplots(2, 2, figsize=(7, 4))
+for i, (ax, indices) in enumerate(zip(axes.flat, frames)):
+    writhe.plot_writhe_matrix(index=indices, ax=ax, dscr=f'Cluster {i+1}')
+fig.tight_layout()
+
 ```
 ---
 
@@ -217,21 +236,22 @@ writhe.compute_writhe(self,
 ---
 
 ### **Arguments**
-| Parameter         | Type                   | Default                          | Description                                                                                                                                                                                              |
-|-------------------|------------------------|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `length`          | `Optional[int]`        | **Required if segments is None** | Segment length for computation.Prefered method of obtaining segments                                                                                                                                     |
-| `segments`        | `Optional[np.ndarray]` | **Required if length is None**   | Segments to use in computation. General uses should leave this to None and provide the length (int) arg to generate the segments automatically.                                                          |
-| `matrix`          | `bool`                 | `False`                          | If `True`, generates a **symmetric writhe matrix**. Generating the full redndant matrix should be avoided and only done transiently for plotting! Using the class method plot_writhe_matrix is preferred |
-| `store_results`   | `bool`                 | `True`                           | If `True`, stores results in the `Writhe` instance.                                                                                                                                                      |
-| `xyz`             | `Optional[np.ndarray]` | `None`                           | Coordinate array used for computation. If `None`, uses `self.xyz`.                                                                                                                                       |
-| `n_points`        | `Optional[int]`        | `None`                           | Number of points in the **topology**. Defaults to `xyz.shape[1]`.                                                                                                                                        |
-| `speed_test`      | `bool`                 | `False`                          | If `True`, performs a **benchmark test** without storing results.                                                                                                                                        |
-| `cpus_per_job`    | `int`                  | `1`                              | Number of **CPUs allocated per batch**.                                                                                                                                                                  |
-| `cuda`            | `bool`                 | `False`                          | If `True`, enables **CUDA acceleration** for GPU computation.                                                                                                                                            |
-| `cuda_batch_size` | `Optional[int]`        | `None`                           | Batch size for **CUDA computation**.                                                                                                                                                                     |
-| `multi_proc`      | `bool`                 | `True`                           | If `True`, enables **multiprocessing** (parallel execution).                                                                                                                                             |
-| `use_cross`       | `bool`                 | `True`                           | If `True`, uses **cross product** in computation.                                                                                                                                                        |
-| `cpu_method`      | `str`                  | `"ray"`                          | CPU computation method (`"ray"` for multiprocessing, `"numba"` for JIT-compiled CPU execution). 'ray' is substantially faster in most cases.                                                               |
+| Parameter         | Type                    | Default                          | Description                                                                                                                                                                                              |
+|-------------------|-------------------------|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `length`          | `Optional[int]`         | **Required if segments is None** | Segment length for computation.Prefered method of obtaining segments                                                                                                                                     |
+| `segments`        | `Optional[np.ndarray]`  | **Required if length is None**   | Segments to use in computation. General uses should leave this to None and provide the length (int) arg to generate the segments automatically.                                                          |
+| `matrix`          | `bool`                  | `False`                          | If `True`, generates a **symmetric writhe matrix**. Generating the full redndant matrix should be avoided and only done transiently for plotting! Using the class method plot_writhe_matrix is preferred |
+| `store_results`   | `bool`                  | `True`                           | If `True`, stores results in the `Writhe` instance.                                                                                                                                                      |
+| `xyz`             | `Optional[np.ndarray]`  | `None`                           | Coordinate array used for computation. If `None`, uses `self.xyz`.                                                                                                                                       |
+| `n_points`        | `Optional[int]`         | `None`                           | Number of points in the **topology**. Defaults to `xyz.shape[1]`.                                                                                                                                        |
+| `speed_test`      | `bool`                  | `False`                          | If `True`, performs a **benchmark test** without storing results.                                                                                                                                        |
+| `cpus_per_job`    | `int`                   | `1`                              | Number of **CPUs allocated per batch**.                                                                                                                                                                  |
+| `cuda`            | `bool`                  | `False`                          | If `True`, enables **CUDA acceleration** for GPU computation.                                                                                                                                            |
+| `cuda_batch_size` | `Optional[int]`         | `None`                           | Batch size for **CUDA computation**.                                                                                                                                                                     |
+| `multi_proc`      | `bool`                  | `True`                           | If `True`, enables **multiprocessing** (parallel execution).                                                                                                                                             |
+| `use_cross`       | `bool`                  | `True`                           | If `True`, uses **cross product** in computation.                                                                                                                                                        |
+| `cpu_method`      | `str`                   | `"ray"`                          | CPU computation method (`"ray"` for multiprocessing, `"numba"` for JIT-compiled CPU execution). 'ray' is substantially faster in most cases.                                                             |
+| `lengths`         | `Optional[np.ndarray]`  | `None`                          | (n_frames, 3) array : Simulation unitcell / box lengths for PBC corrected calculation.                                                                                                                   |
 
 ---
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "writhe_tools"
-version = "0.0.19"
+version = "0.0.25"
 description = "A high-performance Python package for computing the geometric descriptor writhe from 3D coordinate data."
 authors = [
     { name = "Thomas Sisk", email = "Thomas.r.Sisk.gr@dartmouth.edu" }
@@ -33,7 +33,7 @@ cuda11 = [
     "numba>=0.55.0,<0.61.0",
     ]
 
-cuda11_graph = [
+cuda11-graph = [
     "numpy>=1.22.4,<2.0",
     "ray>=2.5.1,<3.0",
     "matplotlib>=3.5.1,<4.0",
@@ -56,9 +56,9 @@ graph = [
     "tqdm>=4.63.0,<5.0"
 ]
 
-mdtraj = [
-    "mdtraj>=1.9.5,<2.0"
-]
+#mdtraj = [
+#    "mdtraj==1.10.3" --no-deps
+#]
 
 stats = [
     #"pyblock>=0.6",
